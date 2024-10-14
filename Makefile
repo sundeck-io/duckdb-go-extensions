@@ -21,13 +21,13 @@ CORE_COMMAND =  \
 	mkdir build && \
 	cd build && \
 	cmake -DBUILD_EXTENSIONS="icu;parquet;tpch;tpcds;json" -DBUILD_ONLY_EXTENSIONS=TRUE .. && \
-	CFLAGS="${CFLAGS}" CXXFLAGS="${CXXFLAGS}" CC="${CC}" CXX="${CXX}" ${DUCKDB_COMMON_BUILD_FLAGS} make icu_extension tpch_extension tpcds_extension json_extension parquet_extension -j 2 && \
+	$(if $(strip $(CC)),CC="$(CC)") $(if $(strip $(CXX)),CXX="$(CXX)") CFLAGS="${CFLAGS}" CXXFLAGS="${CXXFLAGS}" ${DUCKDB_COMMON_BUILD_FLAGS} make icu_extension tpch_extension tpcds_extension json_extension parquet_extension -j 2 && \
 	cd ../.. && \
 	find duckdb/build/ -type f -name '*extension*.a' -exec cp {} deps/$(DEP_NAME) \;
 
 SUBSTRAIT_COMMAND = \
 	cd substrait && \
-	CFLAGS="${CFLAGS}" CXXFLAGS="${CXXFLAGS}" CC="${CC}" CXX="${CXX}" ${DUCKDB_COMMON_BUILD_FLAGS} make -j 2 && \
+	$(if $(strip $(CC)),CC="$(CC)") $(if $(strip $(CXX)),CXX="$(CXX)")  CFLAGS="${CFLAGS}" CXXFLAGS="${CXXFLAGS}" ${DUCKDB_COMMON_BUILD_FLAGS} make -j 2 && \
 	cd .. && \
 	cp substrait/build/release/extension/substrait/libsubstrait_extension.a deps/$(DEP_NAME)
 
