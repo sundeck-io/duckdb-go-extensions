@@ -42,6 +42,7 @@ PRE_COMPILE_TARGETS += substrait
 endif
 
 define get_build_commands
+$(MKDIR_COMMAND)
 $(if $(filter TRUE,$(or $(BUILD_CORE),TRUE)), $(CORE_COMMAND))
 $(if $(filter TRUE,$(or $(BUILD_SUBSTRAIT),TRUE)), $(SUBSTRAIT_COMMAND))
 endef
