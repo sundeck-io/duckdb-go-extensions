@@ -15,6 +15,7 @@ DUCKDB_COMMON_BUILD_FLAGS := BUILD_SHELL=0 BUILD_UNITTESTS=0 DUCKDB_PLATFORM=any
 CHECK_DARWIN = if [ "$(shell uname -s | tr '[:upper:]' '[:lower:]')" != "darwin" ]; then echo "Error: must run build on darwin"; false; fi
 CHECK_LINUX = if [ "$(shell uname -s | tr '[:upper:]' '[:lower:]')" != "linux" ]; then echo "Error: must run build on linux"; false; fi
 MKDIR_COMMAND = mkdir -p deps/$(DEP_NAME)
+
 CORE_COMMAND =  \
 	cd duckdb && \
 	mkdir build && \
@@ -22,7 +23,7 @@ CORE_COMMAND =  \
 	cmake -DBUILD_EXTENSIONS="icu;parquet;tpch;tpcds;json" -DBUILD_ONLY_EXTENSIONS=TRUE .. && \
 	CFLAGS="${CFLAGS}" CXXFLAGS="${CXXFLAGS}" CC="${CC}" CXX="${CXX}" ${DUCKDB_COMMON_BUILD_FLAGS} make icu_extension tpch_extension tpcds_extension json_extension parquet_extension -j 2 && \
 	cd ../.. && \
-	find duckdb/build/ -type f -name '*extension*.a' -exec cp {} deps/$(DEP_NAME) \; && \
+	find duckdb/build/ -type f -name '*extension*.a' -exec cp {} deps/$(DEP_NAME) \;
 
 SUBSTRAIT_COMMAND = \
 	cd substrait && \
