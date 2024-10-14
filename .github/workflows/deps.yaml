@@ -9,7 +9,6 @@ on:
       - "Makefile"
 jobs:
   darwin_amd64:
-    needs: prepare
     runs-on: macos-13
     steps:
       - uses: actions/checkout@v4
@@ -23,7 +22,6 @@ jobs:
           path: deps/darwin_amd64/*
           retention-days: 1
   darwin_arm64:
-    needs: prepare
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
@@ -37,7 +35,6 @@ jobs:
           path: deps/darwin_arm64/*
           retention-days: 1
   linux_amd64:
-    needs: prepare
     runs-on: ubuntu-20.04
     steps:
       - uses: actions/checkout@v4
@@ -51,7 +48,6 @@ jobs:
           path: deps/linux_amd64/*
           retention-days: 1
   linux_arm64:
-    needs: prepare
     runs-on: ubuntu-20.04
     steps:
       - uses: actions/checkout@v4
