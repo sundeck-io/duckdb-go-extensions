@@ -38,7 +38,7 @@ deps.darwin.arm64: CFLAGS += -target arm64-apple-macos11
 deps.darwin.arm64: CXXFLAGS += -target arm64-apple-macos11
 deps.darwin.arm64: DEPS_PATH = darwin_arm64
 
-deps.darwin.arm64:
+deps.darwin.arm64: duckdb
 	$(CHECK_DARWIN)
 	$(WORK_COMMAND)
 
