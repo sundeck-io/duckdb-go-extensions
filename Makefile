@@ -21,13 +21,13 @@ CORE_COMMAND =  \
 	mkdir build && \
 	cd build && \
 	cmake -DBUILD_EXTENSIONS="icu;parquet;tpch;tpcds;json" -DBUILD_ONLY_EXTENSIONS=TRUE .. && \
-	$(if $(strip $(CC)),CC="$(CC)") $(if $(strip $(CXX)),CXX="$(CXX)") CFLAGS="${CFLAGS}" CXXFLAGS="${CXXFLAGS}" ${DUCKDB_COMMON_BUILD_FLAGS} make icu_extension tpch_extension tpcds_extension json_extension parquet_extension -j 2 && \
+	MACOSX_DEPLOYMENT_TARGET=11.0 CC="${CC}" CXX="${CXX}" CFLAGS="${CFLAGS}" CXXFLAGS="${CXXFLAGS}" ${DUCKDB_COMMON_BUILD_FLAGS} make icu_extension tpch_extension tpcds_extension json_extension parquet_extension -j 2 && \
 	cd ../.. && \
 	find duckdb/build/ -type f -name '*extension*.a' -exec cp {} deps/$(DEP_NAME) \;
 
 SUBSTRAIT_COMMAND = \
 	cd substrait && \
-	$(if $(strip $(CC)),CC="$(CC)") $(if $(strip $(CXX)),CXX="$(CXX)")  CFLAGS="${CFLAGS}" CXXFLAGS="${CXXFLAGS}" ${DUCKDB_COMMON_BUILD_FLAGS} make -j 2 && \
+	MACOSX_DEPLOYMENT_TARGET=11.0 CC="${CC}" CXX="${CXX}" CFLAGS="${CFLAGS}" CXXFLAGS="${CXXFLAGS}" ${DUCKDB_COMMON_BUILD_FLAGS} make -j 2 && \
 	cd .. && \
 	cp substrait/build/release/extension/substrait/libsubstrait_extension.a deps/$(DEP_NAME)
 
@@ -67,11 +67,16 @@ deps.header: duckdb substrait
 	cp duckdb/extension/tpch/include/tpch_extension.hpp include/
 	cp duckdb/extension/tpcds/include/tpcds_extension.hpp include/
 	cp duckdb/extension/parquet/include/parquet_extension.hpp include/
-	python3 duckdb/scripts/amalgamation.py
-	cp duckdb/src/amalgamation/duckdb.hpp include/
-	sed -i '/#include "duckdb\/main\/client_context.hpp"/d' include/tpcds_extension.hpp
+	sed '/#include "duckdb\/main\/client_context.hpp"/d' include/tpcds_extension.hpp > temp_file && mv temp_file include/tpcds_extension.hpp
+	cd duckdb
+	python3 scripts/amalgamation.py
+	cp src/amalgamation/duckdb.hpp ../include/
+	cd ..
+
 
 .PHONY: deps.darwin.amd64
+deps.darwin.amd64: CC = clang
+deps.darwin.amd64: CXX = clang++
 deps.darwin.amd64: CFLAGS += -target x86_64-apple-macos11
 deps.darwin.amd64: CXXFLAGS += -target x86_64-apple-macos11
 deps.darwin.amd64: DEP_NAME = darwin_amd64
@@ -80,6 +85,8 @@ deps.darwin.amd64: $(PRE_COMPILE_TARGETS)
 	$(get_build_commands)
 
 .PHONY: deps.darwin.arm64
+deps.darwin.arm64: CC = clang
+deps.darwin.arm64: CXX = clang++
 deps.darwin.arm64: CFLAGS += -target arm64-apple-macos11
 deps.darwin.arm64: CXXFLAGS += -target arm64-apple-macos11
 deps.darwin.arm64: DEP_NAME = darwin_arm64
