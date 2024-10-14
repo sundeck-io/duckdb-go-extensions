@@ -14,7 +14,7 @@ DUCKDB_COMMON_BUILD_FLAGS := BUILD_SHELL=0 BUILD_UNITTESTS=0 DUCKDB_PLATFORM=any
 
 CHECK_DARWIN = if [ "$(shell uname -s | tr '[:upper:]' '[:lower:]')" != "darwin" ]; then echo "Error: must run build on darwin"; false; fi
 CHECK_LINUX = if [ "$(shell uname -s | tr '[:upper:]' '[:lower:]')" != "linux" ]; then echo "Error: must run build on linux"; false; fi
-MKDIR_COMMAND = mkdir -p deps/$(DEP_NAME)
+MKDIR_COMMAND = rm -rf deps/$(DEP_NAME) && mkdir -p deps/$(DEP_NAME)
 
 CORE_COMMAND =  \
 	cd duckdb && \
