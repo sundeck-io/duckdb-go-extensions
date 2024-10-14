@@ -1,4 +1,3 @@
-#include <chrono>
 #include "include/duckdb.hpp"
 #include "include/icu_extension.hpp"
 #include "include/substrait_extension.hpp"

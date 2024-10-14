@@ -67,6 +67,9 @@ deps.header: duckdb substrait
 	cp duckdb/extension/tpch/include/tpch_extension.hpp include/
 	cp duckdb/extension/tpcds/include/tpcds_extension.hpp include/
 	cp duckdb/extension/parquet/include/parquet_extension.hpp include/
+	python3 duckdb/scripts/amalgamation.py
+	cp duckdb/src/amalgamation/duckdb.hpp include/
+	sed -i '/#include "duckdb\/main\/client_context.hpp"/d' include/tpcds_extension.hpp
 
 .PHONY: deps.darwin.amd64
 deps.darwin.amd64: CFLAGS += -target x86_64-apple-macos11
