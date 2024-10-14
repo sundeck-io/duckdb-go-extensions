@@ -23,9 +23,9 @@ WORK_COMMAND =  \
 	cd ../.. && \
 	find duckdb/build/ -type f -name '*extension*.a' -exec cp {} deps/$(DEPS_PATH) \; && \
 	cd substrait && \
-	CFLAGS="${CFLAGS}" CXXFLAGS="${CXXFLAGS}" CC="${CC}" CXX="${CXX}" make -j 2 &&
+	CFLAGS="${CFLAGS}" CXXFLAGS="${CXXFLAGS}" CC="${CC}" CXX="${CXX}" make -j 2 && \
 	cd .. && \
-	cp substrait/build/release/extension/substrait/libsubstrait_extension.a deps/$(DEPS_PATH) \
+	cp substrait/build/release/extension/substrait/libsubstrait_extension.a deps/$(DEPS_PATH)
 
 .PHONY: duckdb
 duckdb:
