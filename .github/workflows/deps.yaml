@@ -21,47 +21,80 @@ jobs:
           name: includes
           path: include/*
           retention-days: 1
+
   darwin_amd64:
     runs-on: macos-13
+    strategy:
+      matrix:
+        build_type:
+          - { name: 'core', BUILD_CORE: 'TRUE', BUILD_SUBSTRAIT: 'FALSE' }
+          - { name: 'substrait', BUILD_CORE: 'FALSE', BUILD_SUBSTRAIT: 'TRUE' }
     steps:
       - uses: actions/checkout@v4
         with:
           ref: ${{ github.head_ref }}
       - shell: bash
+        env:
+          BUILD_CORE: ${{ matrix.build_type.BUILD_CORE }}
+          BUILD_SUBSTRAIT: ${{ matrix.build_type.BUILD_SUBSTRAIT }}
         run: make deps.darwin.amd64
       - uses: actions/upload-artifact@v4
         with:
-          name: darwin_amd64
+          name: darwin_amd64_${{ matrix.build_type.name }}
           path: deps/darwin_amd64/*
           retention-days: 1
+
   darwin_arm64:
     runs-on: macos-latest
+    strategy:
+      matrix:
+        build_type:
+          - { name: 'core', BUILD_CORE: 'TRUE', BUILD_SUBSTRAIT: 'FALSE' }
+          - { name: 'substrait', BUILD_CORE: 'FALSE', BUILD_SUBSTRAIT: 'TRUE' }
     steps:
       - uses: actions/checkout@v4
         with:
           ref: ${{ github.head_ref }}
       - shell: bash
+        env:
+          BUILD_CORE: ${{ matrix.build_type.BUILD_CORE }}
+          BUILD_SUBSTRAIT: ${{ matrix.build_type.BUILD_SUBSTRAIT }}
         run: make deps.darwin.arm64
       - uses: actions/upload-artifact@v4
         with:
-          name: darwin_arm64
+          name: darwin_arm64_${{ matrix.build_type.name }}
           path: deps/darwin_arm64/*
           retention-days: 1
+
   linux_amd64:
     runs-on: ubuntu-20.04
+    strategy:
+      matrix:
+        build_type:
+          - { name: 'core', BUILD_CORE: 'TRUE', BUILD_SUBSTRAIT: 'FALSE' }
+          - { name: 'substrait', BUILD_CORE: 'FALSE', BUILD_SUBSTRAIT: 'TRUE' }
     steps:
       - uses: actions/checkout@v4
         with:
           ref: ${{ github.head_ref }}
       - shell: bash
+        env:
+          BUILD_CORE: ${{ matrix.build_type.BUILD_CORE }}
+          BUILD_SUBSTRAIT: ${{ matrix.build_type.BUILD_SUBSTRAIT }}
         run: make deps.linux.amd64
       - uses: actions/upload-artifact@v4
         with:
-          name: linux_amd64
+          name: linux_amd64_${{ matrix.build_type.name }}
           path: deps/linux_amd64/*
           retention-days: 1
+
   linux_arm64:
     runs-on: ubuntu-20.04
+    strategy:
+      matrix:
+        build_type:
+          - { name: 'core', BUILD_CORE: 'TRUE', BUILD_SUBSTRAIT: 'FALSE' }
+          - { name: 'substrait', BUILD_CORE: 'FALSE', BUILD_SUBSTRAIT: 'TRUE' }
     steps:
       - uses: actions/checkout@v4
         with:
@@ -72,10 +105,13 @@ jobs:
           sudo apt update
           sudo apt install -y gcc-aarch64-linux-gnu g++-aarch64-linux-gnu
       - shell: bash
+        env:
+          BUILD_CORE: ${{ matrix.build_type.BUILD_CORE }}
+          BUILD_SUBSTRAIT: ${{ matrix.build_type.BUILD_SUBSTRAIT }}
         run: make deps.linux.arm64
       - uses: actions/upload-artifact@v4
         with:
-          name: linux_arm64
+          name: linux_arm64_${{ matrix.build_type.name }}
           path: deps/linux_arm64/*
           retention-days: 1
 
@@ -101,19 +137,35 @@ jobs:
           path: include
       - uses: actions/download-artifact@v4
         with:
-          name: darwin_amd64
+          name: darwin_amd64_core
           path: deps/darwin_amd64
       - uses: actions/download-artifact@v4
         with:
-          name: darwin_arm64
+          name: darwin_amd64_substrait
+          path: deps/darwin_amd64
+      - uses: actions/download-artifact@v4
+        with:
+          name: darwin_arm64_core
           path: deps/darwin_arm64
       - uses: actions/download-artifact@v4
         with:
-          name: linux_amd64
+          name: darwin_arm64_substrait
+          path: deps/darwin_arm64
+      - uses: actions/download-artifact@v4
+        with:
+          name: linux_amd64_core
           path: deps/linux_amd64
       - uses: actions/download-artifact@v4
         with:
-          name: linux_arm64
+          name: linux_amd64_substrait
+          path: deps/linux_amd64
+      - uses: actions/download-artifact@v4
+        with:
+          name: linux_arm64_core
+          path: deps/linux_arm64
+      - uses: actions/download-artifact@v4
+        with:
+          name: linux_arm64_substrait
           path: deps/linux_arm64
       - name: Push static libraries
         uses: stefanzweifel/git-auto-commit-action@v5
