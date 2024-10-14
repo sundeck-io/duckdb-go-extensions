@@ -68,10 +68,8 @@ deps.header: duckdb substrait
 	cp duckdb/extension/tpcds/include/tpcds_extension.hpp include/
 	cp duckdb/extension/parquet/include/parquet_extension.hpp include/
 	sed '/#include "duckdb\/main\/client_context.hpp"/d' include/tpcds_extension.hpp > temp_file && mv temp_file include/tpcds_extension.hpp
-	cd duckdb
-	python3 scripts/amalgamation.py
-	cp src/amalgamation/duckdb.hpp ../include/
-	cd ..
+	cd duckdb && python3 scripts/amalgamation.py
+	cp duckdb/src/amalgamation/duckdb.hpp include/
 
 
 .PHONY: deps.darwin.amd64
