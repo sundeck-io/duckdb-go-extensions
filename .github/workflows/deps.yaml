@@ -1,0 +1,111 @@
+name: Build static library dependencies
+on:
+  workflow_dispatch:
+  push:
+    branches-ignore:
+      - main
+    paths:
+      - ".github/workflows/**"
+      - "Makefile"
+jobs:
+  darwin_amd64:
+    needs: prepare
+    runs-on: macos-13
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.head_ref }}
+      - shell: bash
+        run: make deps.darwin.amd64
+      - uses: actions/upload-artifact@v4
+        with:
+          name: darwin_amd64
+          path: deps/darwin_amd64/*
+          retention-days: 1
+  darwin_arm64:
+    needs: prepare
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.head_ref }}
+      - shell: bash
+        run: make deps.darwin.arm64
+      - uses: actions/upload-artifact@v4
+        with:
+          name: darwin_arm64
+          path: deps/darwin_arm64/*
+          retention-days: 1
+  linux_amd64:
+    needs: prepare
+    runs-on: ubuntu-20.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.head_ref }}
+      - shell: bash
+        run: make deps.linux.amd64
+      - uses: actions/upload-artifact@v4
+        with:
+          name: linux_amd64
+          path: deps/linux_amd64/*
+          retention-days: 1
+  linux_arm64:
+    needs: prepare
+    runs-on: ubuntu-20.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.head_ref }}
+      - name: Install cross compile toolchain
+        shell: bash
+        run: |
+          sudo apt update
+          sudo apt install -y gcc-aarch64-linux-gnu g++-aarch64-linux-gnu
+      - shell: bash
+        run: make deps.linux.arm64
+      - uses: actions/upload-artifact@v4
+        with:
+          name: linux_arm64
+          path: deps/linux_arm64/*
+          retention-days: 1
+
+  commit:
+    runs-on: ubuntu-latest
+    needs: [darwin_amd64, darwin_arm64, linux_amd64, linux_arm64]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.head_ref }}
+      - shell: bash
+        run: |
+          rm -f deps/darwin_amd64/*
+          rm -f deps/darwin_arm64/*
+          rm -f deps/linux_amd64/*
+          rm -f deps/linux_arm64/*
+          rm -f deps/freebsd_amd64/*
+          rm -f deps/windows_amd64/*
+      - uses: actions/download-artifact@v4
+        with:
+          name: duckdb_h
+          path: .
+      - uses: actions/download-artifact@v4
+        with:
+          name: darwin_amd64
+          path: deps/darwin_amd64
+      - uses: actions/download-artifact@v4
+        with:
+          name: darwin_arm64
+          path: deps/darwin_arm64
+      - uses: actions/download-artifact@v4
+        with:
+          name: linux_amd64
+          path: deps/linux_amd64
+      - uses: actions/download-artifact@v4
+        with:
+          name: linux_arm64
+          path: deps/linux_arm64
+      - name: Push static libraries
+        uses: stefanzweifel/git-auto-commit-action@v5
+        with:
+          commit_message: Re-build static libraries
