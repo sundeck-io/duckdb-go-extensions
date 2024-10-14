@@ -4,7 +4,6 @@ DUCKDB_BRANCH=v1.1.1
 SUBSTRAIT_REPO=https://github.com/sundeck-io/duckdb-substrait.git
 SUBSTRAIT_BRANCH=sundeck
 
-
 CFLAGS   = -O3
 CXXFLAGS = -O3
 CC 		 = ""
@@ -25,19 +24,8 @@ WORK_COMMAND =  \
 	find duckdb/build/ -type f -name '*extension*.a' -exec cp {} deps/$(DEPS_PATH) \; && \
 	cd substrait && \
 	CFLAGS="${CFLAGS}" CXXFLAGS="${CXXFLAGS}" CC="${CC}" CXX="${CXX}" make -j 2 &&
-	cd .. \
+	cd .. && \
 	cp substrait/build/release/extension/substrait/libsubstrait_extension.a deps/$(DEPS_PATH) \
-
-
-.PHONY: deps.header
-deps.header: duckdb substrait
-	mkdir -p include
-	cp substrait/src/include/substrait_extension.hpp include/
-	cp duckdb/extension/icu/include/icu_extension.hpp include/
-	cp duckdb/extension/json/include/json_extension.hpp include/
-	cp duckdb/extension/tpch/include/tpch_extension.hpp include/
-	cp duckdb/extension/tpcds/include/tpcds_extension.hpp include/
-	cp duckdb/extension/parquet/include/parquet_extension.hpp include/
 
 .PHONY: duckdb
 duckdb:
@@ -48,6 +36,16 @@ duckdb:
 substrait:
 	rm -rf substrait
 	git clone -b $(SUBSTRAIT_BRANCH) --depth 1 $(SUBSTRAIT_REPO) --recurse-submodules substrait
+
+.PHONY: deps.header
+deps.header: duckdb substrait
+	mkdir -p include
+	cp substrait/src/include/substrait_extension.hpp include/
+	cp duckdb/extension/icu/include/icu_extension.hpp include/
+	cp duckdb/extension/json/include/json_extension.hpp include/
+	cp duckdb/extension/tpch/include/tpch_extension.hpp include/
+	cp duckdb/extension/tpcds/include/tpcds_extension.hpp include/
+	cp duckdb/extension/parquet/include/parquet_extension.hpp include/
 
 .PHONY: deps.darwin.amd64
 deps.darwin.amd64: CFLAGS += -target x86_64-apple-macos11
