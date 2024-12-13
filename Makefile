@@ -4,6 +4,9 @@ DUCKDB_BRANCH=v1.1.1
 SUBSTRAIT_REPO=https://github.com/substrait-io/duckdb-substrait-extension.git
 SUBSTRAIT_BRANCH=main
 
+ICEBERG_REPO=https://github.com/duckdb/duckdb_iceberg.git
+ICEBERG_BRANCH=main
+
 CFLAGS   = -O3
 CXXFLAGS = -O3
 CC 		 = ""
@@ -58,8 +61,13 @@ substrait:
 	rm -rf substrait
 	git clone -b $(SUBSTRAIT_BRANCH) --depth 1 $(SUBSTRAIT_REPO) --recurse-submodules substrait
 
+.PHONY: iceberg
+iceberg:
+	rm -rf duckdb_iceberg
+	git clone -b $(ICEBERG_BRANCH) --depth 1 $(ICEBERG_REPO) --recurse-submodules
+
 .PHONY: deps.header
-deps.header: duckdb substrait
+deps.header: duckdb substrait iceberg
 	mkdir -p include
 	cp substrait/src/include/substrait_extension.hpp include/
 	cp duckdb/extension/icu/include/icu_extension.hpp include/
@@ -67,6 +75,7 @@ deps.header: duckdb substrait
 	cp duckdb/extension/tpch/include/tpch_extension.hpp include/
 	cp duckdb/extension/tpcds/include/tpcds_extension.hpp include/
 	cp duckdb/extension/parquet/include/parquet_extension.hpp include/
+	cp duckdb_iceberg/src/include/iceberg_extension.hpp include/
 	sed '/#include "duckdb\/main\/client_context.hpp"/d' include/tpcds_extension.hpp > temp_file && mv temp_file include/tpcds_extension.hpp
 	cd duckdb && python3 scripts/amalgamation.py
 	cp duckdb/src/amalgamation/duckdb.hpp include/
