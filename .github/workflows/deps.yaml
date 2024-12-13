@@ -196,3 +196,104 @@ jobs:
       duckdb_version: v1.1.3
       ci_tools_version: v1.1.3
       exclude_archs: 'linux_amd64_gcc4'
+
+  test_darwin_amd64:
+    runs-on: macos-13
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.head_ref }}
+
+      - name: Install avrocpp
+        shell: bash
+        run: |
+          brew install avro-cpp
+
+      - name: Set up Go
+        uses: actions/setup-go@v2
+        with:
+          go-version: '1.23'
+
+      - name: Test loading the extensions
+        run: go test -run ^TestLoaded
+
+  test_darwin_arm64:
+    runs-on: macos-13
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.head_ref }}
+
+      - name: Install avrocpp
+        shell: bash
+        run: |
+          brew install avro-cpp
+
+      - name: Set up Go
+        uses: actions/setup-go@v2
+        with:
+          go-version: '1.23'
+
+      - name: Test loading the extensions
+        run: go test -run ^TestLoaded
+
+  test_linux_amd64:
+    runs-on: ubuntu-20.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.head_ref }}
+
+      - name: Install Avro C++ from Source
+        run: |
+          # Install dependencies
+          sudo apt-get update
+          sudo apt-get install -y libboost-all-dev libboost-iostreams-dev libboost-system-dev cmake
+
+          # Download Apache Avro C++ source
+          AVRO_VERSION="1.12.0"
+          wget https://archive.apache.org/dist/avro/avro-${AVRO_VERSION}/cpp/avro-cpp-${AVRO_VERSION}.tar.gz
+          tar -xzf avro-cpp-${AVRO_VERSION}.tar.gz
+          cd avro-cpp-${AVRO_VERSION}
+
+          # Build and install
+          sudo ./build.sh install
+
+      - name: Set up Go
+        uses: actions/setup-go@v2
+        with:
+          go-version: '1.23'
+
+      - name: Test loading the extensions
+        run: go test -run ^TestLoaded
+
+  test_linux_arm64:
+    runs-on: ubuntu-20.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.head_ref }}
+
+      - name: Install Avro C++ from Source
+        run: |
+          # Install dependencies
+          sudo apt-get update
+          sudo apt-get install -y libboost-all-dev libboost-iostreams-dev libboost-system-dev cmake
+
+          # Download Apache Avro C++ source
+          AVRO_VERSION="1.12.0"
+          wget https://archive.apache.org/dist/avro/avro-${AVRO_VERSION}/cpp/avro-cpp-${AVRO_VERSION}.tar.gz
+          tar -xzf avro-cpp-${AVRO_VERSION}.tar.gz
+          cd avro-cpp-${AVRO_VERSION}
+
+          # Build and install
+          sudo ./build.sh install
+
+      - name: Set up Go
+        uses: actions/setup-go@v2
+        with:
+          go-version: '1.23'
+
+      - name: Test loading the extensions
+        run: |
+          go test -run ^TestLoaded
