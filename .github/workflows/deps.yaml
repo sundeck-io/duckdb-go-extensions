@@ -117,7 +117,7 @@ jobs:
 
   commit:
     runs-on: ubuntu-latest
-    needs: [headers, darwin_amd64, darwin_arm64, linux_amd64, linux_arm64]
+    needs: [headers, darwin_amd64, darwin_arm64, linux_amd64, linux_arm64, iceberg]
     steps:
       - uses: actions/checkout@v4
         with:
@@ -145,11 +145,19 @@ jobs:
           path: deps/darwin_amd64
       - uses: actions/download-artifact@v4
         with:
+          name: iceberg-v1.1.3-extension-osx_amd64
+          path: deps/darwin_amd64
+      - uses: actions/download-artifact@v4
+        with:
           name: darwin_arm64_core
           path: deps/darwin_arm64
       - uses: actions/download-artifact@v4
         with:
           name: darwin_arm64_substrait
+          path: deps/darwin_arm64
+      - uses: actions/download-artifact@v4
+        with:
+          name: iceberg-v1.1.3-extension-osx_arm64
           path: deps/darwin_arm64
       - uses: actions/download-artifact@v4
         with:
@@ -161,13 +169,30 @@ jobs:
           path: deps/linux_amd64
       - uses: actions/download-artifact@v4
         with:
+          name: iceberg-v1.1.3-extension-linux_amd64
+          path: deps/linux_amd64
+      - uses: actions/download-artifact@v4
+        with:
           name: linux_arm64_core
           path: deps/linux_arm64
       - uses: actions/download-artifact@v4
         with:
           name: linux_arm64_substrait
           path: deps/linux_arm64
+      - uses: actions/download-artifact@v4
+        with:
+          name: iceberg-v1.1.3-extension-linux_arm64
+          path: deps/linux_arm64
       - name: Push static libraries
         uses: stefanzweifel/git-auto-commit-action@v5
         with:
           commit_message: Re-build static libraries
+
+  iceberg:
+    name: Build extension binaries
+    uses: ./.github/workflows/iceberg_extension_distribution.yaml
+    with:
+      extension_name: iceberg
+      duckdb_version: v1.1.3
+      ci_tools_version: v1.1.3
+      exclude_archs: 'linux_amd64_gcc4'
