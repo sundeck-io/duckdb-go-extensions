@@ -115,3 +115,25 @@ deps.linux.arm64: $(PRE_COMPILE_TARGETS)
 	$(CHECK_LINUX)
 	$(get_build_commands)
 
+.PHONY: deps.avrocpp
+deps.avrocpp: AVRO_DIR = avro-cpp-$(AVRO_VERSION)
+deps.avrocpp:
+	# Ensure AVRO_VERSION is defined
+	@if [ -z "$(AVRO_VERSION)" ]; then \
+	  echo "Error: AVRO_VERSION is not defined. Please set it as an environment variable."; \
+	  exit 1; \
+	fi
+
+	# Print for debugging
+	@echo "Using AVRO_DIR: $(AVRO_DIR)"
+	@mkdir -p $(AVRO_DIR)
+
+	# Download and extract Avro C++ source if not already present
+	@if [ ! -d "$(AVRO_DIR)/src" ]; then \
+	  echo "Downloading Avro C++ $(AVRO_VERSION)..."; \
+	  wget https://archive.apache.org/dist/avro/avro-$(AVRO_VERSION)/cpp/$(AVRO_DIR).tar.gz; \
+	  tar -xzf $(AVRO_DIR).tar.gz -C $(AVRO_DIR); \
+	fi
+
+	# Build and install
+	@cd $(AVRO_DIR)/$(AVRO_DIR) && sudo MACOSX_DEPLOYMENT_TARGET=11.0 ./build.sh install

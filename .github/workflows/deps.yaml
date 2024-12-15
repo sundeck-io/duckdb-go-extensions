@@ -197,103 +197,52 @@ jobs:
       ci_tools_version: v1.1.3
       exclude_archs: 'linux_amd64_gcc4'
 
-  test_darwin_amd64:
-    runs-on: macos-13
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          ref: ${{ github.head_ref }}
+  test:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ macos-13, ubuntu-20.04 ]
+        arch: [ x86_64 ]
 
-      - name: Install avrocpp
-        shell: bash
+    env:
+      AVRO_VERSION: 1.12.0
+
+    steps:
+      - name: Dump System Architecture
         run: |
-          brew install avro-cpp
+          echo "Operating System: ${{ matrix.os }}"
+          echo "Architecture: $(uname -m)"
+
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Extract Go version from go.mod
+        id: extract-go-version
+        run: |
+          GO_VERSION=$(grep -m1 '^go ' go.mod | awk '{print $2}')
+          if [ -z "$GO_VERSION" ]; then
+            echo "No Go version specified in go.mod"
+            exit 1
+          fi
+          echo "go-version=$GO_VERSION" >> $GITHUB_ENV
 
       - name: Set up Go
-        uses: actions/setup-go@v2
+        uses: actions/setup-go@v4
         with:
-          go-version: '1.23'
+          go-version: ${{ env.go-version }}
 
-      - name: Test loading the extensions
+      - name: Install Dependencies
+        run: |
+          if [[ "${{ matrix.os }}" == "ubuntu-20.04" ]]; then
+            sudo apt-get update
+            sudo apt-get install -y libboost-all-dev libboost-iostreams-dev libboost-system-dev cmake
+          elif [[ "${{ matrix.os }}" == "macos-13" ]]; then
+            brew update
+            brew install boost cmake
+          fi
+
+      - name: Install Avro C++ from Source (if not cached)
+        run: make deps.avrocpp
+
+      - name: Run tests
         run: go test -run ^TestLoaded
-
-  test_darwin_arm64:
-    runs-on: macos-13
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          ref: ${{ github.head_ref }}
-
-      - name: Install avrocpp
-        shell: bash
-        run: |
-          brew install avro-cpp
-
-      - name: Set up Go
-        uses: actions/setup-go@v2
-        with:
-          go-version: '1.23'
-
-      - name: Test loading the extensions
-        run: go test -run ^TestLoaded
-
-  test_linux_amd64:
-    runs-on: ubuntu-20.04
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          ref: ${{ github.head_ref }}
-
-      - name: Install Avro C++ from Source
-        run: |
-          # Install dependencies
-          sudo apt-get update
-          sudo apt-get install -y libboost-all-dev libboost-iostreams-dev libboost-system-dev cmake
-
-          # Download Apache Avro C++ source
-          AVRO_VERSION="1.12.0"
-          wget https://archive.apache.org/dist/avro/avro-${AVRO_VERSION}/cpp/avro-cpp-${AVRO_VERSION}.tar.gz
-          tar -xzf avro-cpp-${AVRO_VERSION}.tar.gz
-          cd avro-cpp-${AVRO_VERSION}
-
-          # Build and install
-          sudo ./build.sh install
-
-      - name: Set up Go
-        uses: actions/setup-go@v2
-        with:
-          go-version: '1.23'
-
-      - name: Test loading the extensions
-        run: go test -run ^TestLoaded
-
-  test_linux_arm64:
-    runs-on: ubuntu-20.04
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          ref: ${{ github.head_ref }}
-
-      - name: Install Avro C++ from Source
-        run: |
-          # Install dependencies
-          sudo apt-get update
-          sudo apt-get install -y libboost-all-dev libboost-iostreams-dev libboost-system-dev cmake
-
-          # Download Apache Avro C++ source
-          AVRO_VERSION="1.12.0"
-          wget https://archive.apache.org/dist/avro/avro-${AVRO_VERSION}/cpp/avro-cpp-${AVRO_VERSION}.tar.gz
-          tar -xzf avro-cpp-${AVRO_VERSION}.tar.gz
-          cd avro-cpp-${AVRO_VERSION}
-
-          # Build and install
-          sudo ./build.sh install
-
-      - name: Set up Go
-        uses: actions/setup-go@v2
-        with:
-          go-version: '1.23'
-
-      - name: Test loading the extensions
-        run: |
-          go test -run ^TestLoaded
