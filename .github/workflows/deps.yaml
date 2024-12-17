@@ -1,12 +1,7 @@
 name: Build static library dependencies
 on:
-  workflow_dispatch:
-  push:
-    branches-ignore:
-      - main
-    paths:
-      - ".github/workflows/**"
-      - "Makefile"
+  pull_request:
+    types: [opened, synchronize, reopened]
 jobs:
   headers:
     runs-on: ubuntu-20.04
@@ -201,8 +196,7 @@ jobs:
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
-        os: [ macos-13, ubuntu-20.04 ]
-        arch: [ x86_64 ]
+        os: [ macos-13, macos-13-xlarge, ubuntu-20.04, arm64-builders ]
 
     env:
       AVRO_VERSION: 1.12.0
@@ -236,13 +230,26 @@ jobs:
           if [[ "${{ matrix.os }}" == "ubuntu-20.04" ]]; then
             sudo apt-get update
             sudo apt-get install -y libboost-all-dev libboost-iostreams-dev libboost-system-dev cmake
+          elif [[ "${{ matrix.os }}" == "arm64-builders" ]]; then
+            sudo apt-get update
+            sudo apt-get install -y libboost-all-dev libboost-iostreams-dev libboost-system-dev cmake
           elif [[ "${{ matrix.os }}" == "macos-13" ]]; then
+            brew update
+            brew install boost cmake
+          elif [[ "${{ matrix.os }}" == "macos-13-xlarge" ]]; then
             brew update
             brew install boost cmake
           fi
 
-      - name: Install Avro C++ from Source (if not cached)
+      - name: Install Avro C++ from Source
         run: make deps.avrocpp
 
       - name: Run tests
-        run: go test -run ^TestLoaded
+        run: |
+          if [[ "${{ matrix.os }}" == "macos-13-xlarge" ]]; then
+            ls /opt/homebrew/Cellar/boost/1.87.0/lib/libboost_iostreams.dylib
+            export DYLD_LIBRARY_PATH="/opt/homebrew/Cellar/boost/1.87.0/lib:$DYLD_LIBRARY_PATH"
+            export CGO_LDFLAGS="-L/opt/homebrew/Cellar/boost/1.87.0/lib"
+            echo $DYLD_LIBRARY_PATH
+          fi
+          go test -run ^TestLoaded
