@@ -45,7 +45,7 @@ jobs:
           retention-days: 1
 
   darwin_arm64:
-    runs-on: macos-latest
+    runs-on: macos-13-xlarge
     strategy:
       matrix:
         build_type:
@@ -89,7 +89,7 @@ jobs:
           retention-days: 1
 
   linux_arm64:
-    runs-on: ubuntu-20.04
+    runs-on: arm64-builders
     strategy:
       matrix:
         build_type:
