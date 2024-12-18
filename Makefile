@@ -1,8 +1,8 @@
 DUCKDB_REPO=https://github.com/duckdb/duckdb.git
 DUCKDB_BRANCH=v1.1.1
 
-SUBSTRAIT_REPO=https://github.com/sundeck-io/duckdb-substrait.git
-SUBSTRAIT_BRANCH=sundeck
+SUBSTRAIT_REPO=https://github.com/substrait-io/duckdb-substrait-extension.git
+SUBSTRAIT_BRANCH=main
 
 CFLAGS   = -O3
 CXXFLAGS = -O3
