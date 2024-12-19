@@ -1,0 +1,38 @@
+name: Tests
+on:
+  workflow_dispatch:
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  test_loading_extensions:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ macos-13, macos-13-xlarge, ubuntu-20.04, arm64-builders ]
+
+    steps:
+      - name: Dump System Architecture
+        run: |
+          echo "Operating System: ${{ matrix.os }}"
+          echo "Architecture: $(uname -m)"
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Extract Go version from go.mod
+        id: extract-go-version
+        run: |
+          GO_VERSION=$(grep -m1 '^go ' go.mod | awk '{print $2}')
+          if [ -z "$GO_VERSION" ]; then
+            echo "No Go version specified in go.mod"
+            exit 1
+          fi
+          echo "go-version=$GO_VERSION" >> $GITHUB_ENV
+      - name: Set up Go
+        uses: actions/setup-go@v4
+        with:
+          go-version: ${{ env.go-version }}
+
+      - name: Run tests
+        run: go test -run ^TestLoaded
