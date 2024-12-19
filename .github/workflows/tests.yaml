@@ -1,0 +1,30 @@
+name: Tests
+on:
+  workflow_dispatch:
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  test_loading_extensions:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ macos-13, ubuntu-20.04, arm64-builders ]
+
+    steps:
+      - name: Dump System Architecture
+        run: |
+          echo "Operating System: ${{ matrix.os }}"
+          echo "Architecture: $(uname -m)"
+
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: 'go.mod'
+
+      - name: Run tests
+        run: go test -run ^TestLoaded
