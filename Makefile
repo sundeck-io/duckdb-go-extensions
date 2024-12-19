@@ -1,5 +1,5 @@
 DUCKDB_REPO=https://github.com/duckdb/duckdb.git
-DUCKDB_BRANCH=main
+DUCKDB_BRANCH=c29c67bb971362cd1e9143305acffebb1bc9bd63
 
 SUBSTRAIT_REPO=https://github.com/substrait-io/duckdb-substrait-extension.git
 SUBSTRAIT_BRANCH=main
@@ -51,7 +51,9 @@ endef
 .PHONY: duckdb
 duckdb:
 	rm -rf duckdb
-	git clone -b $(DUCKDB_BRANCH) --depth 1 $(DUCKDB_REPO)
+	git clone --depth 1 $(DUCKDB_REPO) duckdb
+	cd duckdb && git fetch --depth 1 origin $(DUCKDB_BRANCH) && git checkout $(DUCKDB_BRANCH)
+
 
 .PHONY: substrait
 substrait:
