@@ -1,5 +1,5 @@
 DUCKDB_REPO=https://github.com/duckdb/duckdb.git
-DUCKDB_BRANCH=v1.1.1
+DUCKDB_BRANCH=62582045a39653394b2fda409c5e627eecb3ae27
 
 SUBSTRAIT_REPO=https://github.com/substrait-io/duckdb-substrait-extension.git
 SUBSTRAIT_BRANCH=main
