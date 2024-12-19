@@ -3,6 +3,7 @@
 #include "include/substrait_extension.hpp"
 #include "include/tpcds_extension.hpp"
 #include "include/tpch_extension.hpp"
+#include "include/iceberg_extension.hpp"
 
 // this is a copy of an internal duckdb structure as we need it to convert the c handle to a C++ handle.
 // Original structure is here: https://github.com/duckdb/duckdb/blob/main/src/include/duckdb/main/capi/capi_internal.hpp#L31
@@ -30,8 +31,11 @@ void init_extensions(void * db) {
 
     duckdb::TpchExtension tpch;
     tpch.Load(*duck->database);
-    printf("tpch]\n");
+    printf("tpch ");
 
+    duckdb::IcebergExtension iceberg;
+    iceberg.Load(*duck->database);
+    printf("iceberg]\n");
 }
 
 }

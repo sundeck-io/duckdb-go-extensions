@@ -1,12 +1,7 @@
 name: Build static library dependencies
 on:
-  workflow_dispatch:
-  push:
-    branches-ignore:
-      - main
-    paths:
-      - ".github/workflows/**"
-      - "Makefile"
+  pull_request:
+    types: [opened, synchronize, reopened]
 jobs:
   headers:
     runs-on: ubuntu-20.04
@@ -117,7 +112,7 @@ jobs:
 
   commit:
     runs-on: ubuntu-latest
-    needs: [headers, darwin_amd64, darwin_arm64, linux_amd64, linux_arm64]
+    needs: [headers, darwin_amd64, darwin_arm64, linux_amd64, linux_arm64, iceberg]
     steps:
       - uses: actions/checkout@v4
         with:
@@ -145,11 +140,19 @@ jobs:
           path: deps/darwin_amd64
       - uses: actions/download-artifact@v4
         with:
+          name: iceberg-v1.1.3-extension-osx_amd64
+          path: deps/darwin_amd64
+      - uses: actions/download-artifact@v4
+        with:
           name: darwin_arm64_core
           path: deps/darwin_arm64
       - uses: actions/download-artifact@v4
         with:
           name: darwin_arm64_substrait
+          path: deps/darwin_arm64
+      - uses: actions/download-artifact@v4
+        with:
+          name: iceberg-v1.1.3-extension-osx_arm64
           path: deps/darwin_arm64
       - uses: actions/download-artifact@v4
         with:
@@ -161,13 +164,92 @@ jobs:
           path: deps/linux_amd64
       - uses: actions/download-artifact@v4
         with:
+          name: iceberg-v1.1.3-extension-linux_amd64
+          path: deps/linux_amd64
+      - uses: actions/download-artifact@v4
+        with:
           name: linux_arm64_core
           path: deps/linux_arm64
       - uses: actions/download-artifact@v4
         with:
           name: linux_arm64_substrait
           path: deps/linux_arm64
+      - uses: actions/download-artifact@v4
+        with:
+          name: iceberg-v1.1.3-extension-linux_arm64
+          path: deps/linux_arm64
       - name: Push static libraries
         uses: stefanzweifel/git-auto-commit-action@v5
         with:
           commit_message: Re-build static libraries
+
+  iceberg:
+    name: Build extension binaries
+    uses: ./.github/workflows/iceberg_extension_distribution.yaml
+    with:
+      extension_name: iceberg
+      duckdb_version: v1.1.3
+      ci_tools_version: v1.1.3
+      exclude_archs: 'linux_amd64_gcc4'
+
+  test:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ macos-13, macos-13-xlarge, ubuntu-20.04, arm64-builders ]
+
+    env:
+      AVRO_VERSION: 1.12.0
+
+    steps:
+      - name: Dump System Architecture
+        run: |
+          echo "Operating System: ${{ matrix.os }}"
+          echo "Architecture: $(uname -m)"
+
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Extract Go version from go.mod
+        id: extract-go-version
+        run: |
+          GO_VERSION=$(grep -m1 '^go ' go.mod | awk '{print $2}')
+          if [ -z "$GO_VERSION" ]; then
+            echo "No Go version specified in go.mod"
+            exit 1
+          fi
+          echo "go-version=$GO_VERSION" >> $GITHUB_ENV
+
+      - name: Set up Go
+        uses: actions/setup-go@v4
+        with:
+          go-version: ${{ env.go-version }}
+
+      - name: Install Dependencies
+        run: |
+          if [[ "${{ matrix.os }}" == "ubuntu-20.04" ]]; then
+            sudo apt-get update
+            sudo apt-get install -y libboost-all-dev libboost-iostreams-dev libboost-system-dev cmake
+          elif [[ "${{ matrix.os }}" == "arm64-builders" ]]; then
+            sudo apt-get update
+            sudo apt-get install -y libboost-all-dev libboost-iostreams-dev libboost-system-dev cmake
+          elif [[ "${{ matrix.os }}" == "macos-13" ]]; then
+            brew update
+            brew install boost cmake
+          elif [[ "${{ matrix.os }}" == "macos-13-xlarge" ]]; then
+            brew update
+            brew install boost cmake
+          fi
+
+      - name: Install Avro C++ from Source
+        run: make deps.avrocpp
+
+      - name: Run tests
+        run: |
+          if [[ "${{ matrix.os }}" == "macos-13-xlarge" ]]; then
+            ls /opt/homebrew/Cellar/boost/1.87.0/lib/libboost_iostreams.dylib
+            export DYLD_LIBRARY_PATH="/opt/homebrew/Cellar/boost/1.87.0/lib:$DYLD_LIBRARY_PATH"
+            export CGO_LDFLAGS="-L/opt/homebrew/Cellar/boost/1.87.0/lib"
+            echo $DYLD_LIBRARY_PATH
+          fi
+          go test -run ^TestLoaded
