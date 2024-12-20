@@ -3313,6 +3313,9 @@ public:
 	static bool CharacterIsAlpha(char c) {
 		return (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z');
 	}
+	static bool CharacterIsAlphaNumeric(char c) {
+		return CharacterIsAlpha(c) || CharacterIsDigit(c);
+	}
 	static bool CharacterIsOperator(char c) {
 		if (c == '_') {
 			return false;
@@ -3351,6 +3354,7 @@ public:
 
 	//! Returns true if the needle string exists in the haystack
 	DUCKDB_API static bool Contains(const string &haystack, const string &needle);
+	DUCKDB_API static bool Contains(const string &haystack, const char &needle_char);
 
 	//! Returns the position of needle string within the haystack
 	DUCKDB_API static optional_idx Find(const string &haystack, const string &needle);
@@ -3366,6 +3370,10 @@ public:
 
 	//! Split the input string based on newline char
 	DUCKDB_API static vector<string> Split(const string &str, char delimiter);
+
+	//! Split the input string, ignore delimiters within parentheses. Note: leading/trailing spaces are NOT stripped
+	DUCKDB_API static vector<string> SplitWithParentheses(const string &str, char delimiter = ',', char par_open = '(',
+	                                                      char par_close = ')');
 
 	//! Split the input string allong a quote. Note that any escaping is NOT supported.
 	DUCKDB_API static vector<string> SplitWithQuote(const string &str, char delimiter = ',', char quote = '"');
@@ -3427,6 +3435,7 @@ public:
 	DUCKDB_API static string Title(const string &str);
 
 	DUCKDB_API static bool IsLower(const string &str);
+	DUCKDB_API static bool IsUpper(const string &str);
 
 	//! Case insensitive hash
 	DUCKDB_API static uint64_t CIHash(const string &str);
@@ -3519,8 +3528,10 @@ public:
 	//! JSON method that constructs a { string: value } JSON map
 	//! This is the inverse of ParseJSONMap
 	//! NOTE: this method is not efficient
-	DUCKDB_API static string ToJSONMap(ExceptionType type, const string &message,
-	                                   const unordered_map<string, string> &map);
+	DUCKDB_API static string ExceptionToJSONMap(ExceptionType type, const string &message,
+	                                            const unordered_map<string, string> &map);
+
+	DUCKDB_API static string ToJSONMap(const unordered_map<string, string> &map);
 
 	DUCKDB_API static string GetFileName(const string &file_path);
 	DUCKDB_API static string GetFileExtension(const string &file_name);
@@ -4450,6 +4461,11 @@ struct interval_t { // NOLINT
 	int64_t micros;
 
 	inline void Normalize(int64_t &months, int64_t &days, int64_t &micros) const;
+
+	// Normalize to interval bounds.
+	inline static void Borrow(const int64_t msf, int64_t &lsf, int32_t &f, const int64_t scale);
+	inline interval_t Normalize() const;
+
 	inline bool operator==(const interval_t &right) const {
 		//	Quick equality check
 		const auto &left = *this;
@@ -4588,19 +4604,48 @@ public:
 		return left > right;
 	}
 };
+
 void interval_t::Normalize(int64_t &months, int64_t &days, int64_t &micros) const {
-	auto input = *this;
-	int64_t extra_months_d = input.days / Interval::DAYS_PER_MONTH;
-	int64_t extra_months_micros = input.micros / Interval::MICROS_PER_MONTH;
-	input.days -= UnsafeNumericCast<int32_t>(extra_months_d * Interval::DAYS_PER_MONTH);
-	input.micros -= extra_months_micros * Interval::MICROS_PER_MONTH;
+	auto &input = *this;
 
-	int64_t extra_days_micros = input.micros / Interval::MICROS_PER_DAY;
-	input.micros -= extra_days_micros * Interval::MICROS_PER_DAY;
-
-	months = input.months + extra_months_d + extra_months_micros;
-	days = input.days + extra_days_micros;
+	//  Carry left
 	micros = input.micros;
+	int64_t carry_days = micros / Interval::MICROS_PER_DAY;
+	micros -= carry_days * Interval::MICROS_PER_DAY;
+
+	days = input.days;
+	days += carry_days;
+	int64_t carry_months = days / Interval::DAYS_PER_MONTH;
+	days -= carry_months * Interval::DAYS_PER_MONTH;
+
+	months = input.months;
+	months += carry_months;
+}
+
+void interval_t::Borrow(const int64_t msf, int64_t &lsf, int32_t &f, const int64_t scale) {
+	if (msf > NumericLimits<int32_t>::Maximum()) {
+		f = NumericLimits<int32_t>::Maximum();
+		lsf += (msf - f) * scale;
+	} else if (msf < NumericLimits<int32_t>::Minimum()) {
+		f = NumericLimits<int32_t>::Minimum();
+		lsf += (msf - f) * scale;
+	} else {
+		f = UnsafeNumericCast<int32_t>(msf);
+	}
+}
+
+interval_t interval_t::Normalize() const {
+	interval_t result;
+
+	int64_t mm;
+	int64_t dd;
+	Normalize(mm, dd, result.micros);
+
+	//  Borrow right on overflow
+	Borrow(mm, dd, result.months, Interval::DAYS_PER_MONTH);
+	Borrow(dd, result.micros, result.days, Interval::MICROS_PER_DAY);
+
+	return result;
 }
 
 } // namespace duckdb
@@ -5897,6 +5942,9 @@ public:
 	DUCKDB_API void SetDefaultTable(const string &schema, const string &name);
 	DUCKDB_API string GetDefaultTable() const;
 	DUCKDB_API string GetDefaultTableSchema() const;
+
+	//! Returns the dependency manager of this catalog - if the catalog has anye
+	virtual optional_ptr<DependencyManager> GetDependencyManager();
 
 public:
 	template <class T>
@@ -24055,11 +24103,26 @@ typedef struct {
 	int32_t offset;
 } duckdb_time_tz_struct;
 
-//! Timestamps are stored as microseconds since 1970-01-01.
+//! TIMESTAMP values are stored as microseconds since 1970-01-01.
 //! Use the duckdb_from_timestamp and duckdb_to_timestamp functions to extract individual information.
 typedef struct {
 	int64_t micros;
 } duckdb_timestamp;
+
+//! TIMESTAMP_S values are stored as seconds since 1970-01-01.
+typedef struct {
+	int64_t seconds;
+} duckdb_timestamp_s;
+
+//! TIMESTAMP_MS values are stored as milliseconds since 1970-01-01.
+typedef struct {
+	int64_t millis;
+} duckdb_timestamp_ms;
+
+//! TIMESTAMP_NS values are stored as nanoseconds since 1970-01-01.
+typedef struct {
+	int64_t nanos;
+} duckdb_timestamp_ns;
 
 typedef struct {
 	duckdb_date_struct date;
@@ -25098,10 +25161,34 @@ DUCKDB_API duckdb_timestamp duckdb_to_timestamp(duckdb_timestamp_struct ts);
 /*!
 Test a `duckdb_timestamp` to see if it is a finite value.
 
-* @param ts The timestamp object, as obtained from a `DUCKDB_TYPE_TIMESTAMP` column.
+* @param ts The duckdb_timestamp object, as obtained from a `DUCKDB_TYPE_TIMESTAMP` column.
 * @return True if the timestamp is finite, false if it is ±infinity.
 */
 DUCKDB_API bool duckdb_is_finite_timestamp(duckdb_timestamp ts);
+
+/*!
+Test a `duckdb_timestamp_s` to see if it is a finite value.
+
+* @param ts The duckdb_timestamp_s object, as obtained from a `DUCKDB_TYPE_TIMESTAMP_S` column.
+* @return True if the timestamp is finite, false if it is ±infinity.
+*/
+DUCKDB_API bool duckdb_is_finite_timestamp_s(duckdb_timestamp_s ts);
+
+/*!
+Test a `duckdb_timestamp_ms` to see if it is a finite value.
+
+* @param ts The duckdb_timestamp_ms object, as obtained from a `DUCKDB_TYPE_TIMESTAMP_MS` column.
+* @return True if the timestamp is finite, false if it is ±infinity.
+*/
+DUCKDB_API bool duckdb_is_finite_timestamp_ms(duckdb_timestamp_ms ts);
+
+/*!
+Test a `duckdb_timestamp_ns` to see if it is a finite value.
+
+* @param ts The duckdb_timestamp_ns object, as obtained from a `DUCKDB_TYPE_TIMESTAMP_NS` column.
+* @return True if the timestamp is finite, false if it is ±infinity.
+*/
+DUCKDB_API bool duckdb_is_finite_timestamp_ns(duckdb_timestamp_ns ts);
 
 //===--------------------------------------------------------------------===//
 // Hugeint Helpers
@@ -25769,10 +25856,42 @@ DUCKDB_API duckdb_value duckdb_create_time_tz_value(duckdb_time_tz value);
 /*!
 Creates a TIMESTAMP value from a duckdb_timestamp
 
-* @param input The timestamp value
+* @param input The duckdb_timestamp value
 * @return The value. This must be destroyed with `duckdb_destroy_value`.
 */
 DUCKDB_API duckdb_value duckdb_create_timestamp(duckdb_timestamp input);
+
+/*!
+Creates a TIMESTAMP_TZ value from a duckdb_timestamp
+
+* @param input The duckdb_timestamp value
+* @return The value. This must be destroyed with `duckdb_destroy_value`.
+*/
+DUCKDB_API duckdb_value duckdb_create_timestamp_tz(duckdb_timestamp input);
+
+/*!
+Creates a TIMESTAMP_S value from a duckdb_timestamp_s
+
+* @param input The duckdb_timestamp_s value
+* @return The value. This must be destroyed with `duckdb_destroy_value`.
+*/
+DUCKDB_API duckdb_value duckdb_create_timestamp_s(duckdb_timestamp_s input);
+
+/*!
+Creates a TIMESTAMP_MS value from a duckdb_timestamp_ms
+
+* @param input The duckdb_timestamp_ms value
+* @return The value. This must be destroyed with `duckdb_destroy_value`.
+*/
+DUCKDB_API duckdb_value duckdb_create_timestamp_ms(duckdb_timestamp_ms input);
+
+/*!
+Creates a TIMESTAMP_NS value from a duckdb_timestamp_ns
+
+* @param input The duckdb_timestamp_ns value
+* @return The value. This must be destroyed with `duckdb_destroy_value`.
+*/
+DUCKDB_API duckdb_value duckdb_create_timestamp_ns(duckdb_timestamp_ns input);
 
 /*!
 Creates a value from an interval
@@ -25923,9 +26042,41 @@ DUCKDB_API duckdb_time_tz duckdb_get_time_tz(duckdb_value val);
 Returns the TIMESTAMP value of the given value.
 
 * @param val A duckdb_value containing a TIMESTAMP
-* @return A duckdb_timestamp, or MinValue<timestamp_t> if the value cannot be converted
+* @return A duckdb_timestamp, or MinValue<timestamp> if the value cannot be converted
 */
 DUCKDB_API duckdb_timestamp duckdb_get_timestamp(duckdb_value val);
+
+/*!
+Returns the TIMESTAMP_TZ value of the given value.
+
+* @param val A duckdb_value containing a TIMESTAMP_TZ
+* @return A duckdb_timestamp, or MinValue<timestamp_tz> if the value cannot be converted
+*/
+DUCKDB_API duckdb_timestamp duckdb_get_timestamp_tz(duckdb_value val);
+
+/*!
+Returns the duckdb_timestamp_s value of the given value.
+
+* @param val A duckdb_value containing a TIMESTAMP_S
+* @return A duckdb_timestamp_s, or MinValue<timestamp_s> if the value cannot be converted
+*/
+DUCKDB_API duckdb_timestamp_s duckdb_get_timestamp_s(duckdb_value val);
+
+/*!
+Returns the duckdb_timestamp_ms value of the given value.
+
+* @param val A duckdb_value containing a TIMESTAMP_MS
+* @return A duckdb_timestamp_ms, or MinValue<timestamp_ms> if the value cannot be converted
+*/
+DUCKDB_API duckdb_timestamp_ms duckdb_get_timestamp_ms(duckdb_value val);
+
+/*!
+Returns the duckdb_timestamp_ns value of the given value.
+
+* @param val A duckdb_value containing a TIMESTAMP_NS
+* @return A duckdb_timestamp_ns, or MinValue<timestamp_ns> if the value cannot be converted
+*/
+DUCKDB_API duckdb_timestamp_ns duckdb_get_timestamp_ns(duckdb_value val);
 
 /*!
 Returns the interval value of the given value.
@@ -26482,7 +26633,7 @@ DUCKDB_API uint64_t *duckdb_vector_get_validity(duckdb_vector vector);
 Ensures the validity mask is writable by allocating it.
 
 After this function is called, `duckdb_vector_get_validity` will ALWAYS return non-NULL.
-This allows null values to be written to the vector, regardless of whether a validity mask was present before.
+This allows NULL values to be written to the vector, regardless of whether a validity mask was present before.
 
 * @param vector The vector to alter
 */
@@ -27583,6 +27734,11 @@ Append a NULL value to the appender (of any type).
 DUCKDB_API duckdb_state duckdb_append_null(duckdb_appender appender);
 
 /*!
+Append a duckdb_value to the appender.
+*/
+DUCKDB_API duckdb_state duckdb_append_value(duckdb_appender appender, duckdb_value value);
+
+/*!
 Appends a pre-filled data chunk to the specified appender.
  Attempts casting, if the data chunk types do not match the active appender types.
 
@@ -28308,6 +28464,7 @@ enum class OptimizerType : uint32_t {
 	JOIN_FILTER_PUSHDOWN,
 	EXTENSION,
 	MATERIALIZED_CTE,
+	SUM_REWRITER
 };
 
 string OptimizerTypeToString(OptimizerType type);
@@ -28367,6 +28524,7 @@ enum class MetricsType : uint8_t {
     OPTIMIZER_JOIN_FILTER_PUSHDOWN,
     OPTIMIZER_EXTENSION,
     OPTIMIZER_MATERIALIZED_CTE,
+    OPTIMIZER_SUM_REWRITER,
 };
 
 struct MetricsTypeHashFunction {
@@ -31778,7 +31936,7 @@ struct DBConfigOptions {
 	string collation = string();
 	//! The order type used when none is specified (default: ASC)
 	OrderType default_order_type = OrderType::ASCENDING;
-	//! Null ordering used when none is specified (default: NULLS LAST)
+	//! NULL ordering used when none is specified (default: NULLS LAST)
 	DefaultOrderByNullType default_null_order = DefaultOrderByNullType::NULLS_LAST;
 	//! enable COPY and related commands
 	bool enable_external_access = true;
@@ -32926,7 +33084,7 @@ struct DefaultCollationSetting {
 struct DefaultNullOrderSetting {
 	using RETURN_TYPE = DefaultOrderByNullType;
 	static constexpr const char *Name = "default_null_order";
-	static constexpr const char *Description = "Null ordering used when none is specified (NULLS_FIRST or NULLS_LAST)";
+	static constexpr const char *Description = "NULL ordering used when none is specified (NULLS_FIRST or NULLS_LAST)";
 	static constexpr const char *InputType = "VARCHAR";
 	static void SetGlobal(DatabaseInstance *db, DBConfig &config, const Value &parameter);
 	static void ResetGlobal(DatabaseInstance *db, DBConfig &config);
@@ -35423,6 +35581,18 @@ typedef struct {
 	duckdb_value (*duckdb_get_struct_child)(duckdb_value value, idx_t index);
 	duckdb_state (*duckdb_appender_add_column)(duckdb_appender appender, const char *name);
 	duckdb_state (*duckdb_appender_clear_columns)(duckdb_appender appender);
+	bool (*duckdb_is_finite_timestamp_s)(duckdb_timestamp_s ts);
+	bool (*duckdb_is_finite_timestamp_ms)(duckdb_timestamp_ms ts);
+	bool (*duckdb_is_finite_timestamp_ns)(duckdb_timestamp_ns ts);
+	duckdb_value (*duckdb_create_timestamp_tz)(duckdb_timestamp input);
+	duckdb_value (*duckdb_create_timestamp_s)(duckdb_timestamp_s input);
+	duckdb_value (*duckdb_create_timestamp_ms)(duckdb_timestamp_ms input);
+	duckdb_value (*duckdb_create_timestamp_ns)(duckdb_timestamp_ns input);
+	duckdb_timestamp (*duckdb_get_timestamp_tz)(duckdb_value val);
+	duckdb_timestamp_s (*duckdb_get_timestamp_s)(duckdb_value val);
+	duckdb_timestamp_ms (*duckdb_get_timestamp_ms)(duckdb_value val);
+	duckdb_timestamp_ns (*duckdb_get_timestamp_ns)(duckdb_value val);
+	duckdb_state (*duckdb_append_value)(duckdb_appender appender, duckdb_value value);
 } duckdb_ext_api_v0;
 
 //===--------------------------------------------------------------------===//
@@ -35814,6 +35984,18 @@ inline duckdb_ext_api_v0 CreateAPIv0() {
 	result.duckdb_get_struct_child = duckdb_get_struct_child;
 	result.duckdb_appender_add_column = duckdb_appender_add_column;
 	result.duckdb_appender_clear_columns = duckdb_appender_clear_columns;
+	result.duckdb_is_finite_timestamp_s = duckdb_is_finite_timestamp_s;
+	result.duckdb_is_finite_timestamp_ms = duckdb_is_finite_timestamp_ms;
+	result.duckdb_is_finite_timestamp_ns = duckdb_is_finite_timestamp_ns;
+	result.duckdb_create_timestamp_tz = duckdb_create_timestamp_tz;
+	result.duckdb_create_timestamp_s = duckdb_create_timestamp_s;
+	result.duckdb_create_timestamp_ms = duckdb_create_timestamp_ms;
+	result.duckdb_create_timestamp_ns = duckdb_create_timestamp_ns;
+	result.duckdb_get_timestamp_tz = duckdb_get_timestamp_tz;
+	result.duckdb_get_timestamp_s = duckdb_get_timestamp_s;
+	result.duckdb_get_timestamp_ms = duckdb_get_timestamp_ms;
+	result.duckdb_get_timestamp_ns = duckdb_get_timestamp_ns;
+	result.duckdb_append_value = duckdb_append_value;
 	return result;
 }
 
@@ -39186,17 +39368,24 @@ public:
 
 namespace duckdb {
 
+struct FunctionDescription {
+	//! Parameter types (if any)
+	vector<LogicalType> parameter_types;
+	//! Parameter names (if any)
+	vector<string> parameter_names;
+	//! The description (if any)
+	string description;
+	//! Examples (if any)
+	vector<string> examples;
+};
+
 struct CreateFunctionInfo : public CreateInfo {
 	explicit CreateFunctionInfo(CatalogType type, string schema = DEFAULT_SCHEMA);
 
 	//! Function name
 	string name;
-	//! The description (if any)
-	string description;
-	//! Parameter names (if any)
-	vector<string> parameter_names;
-	//! The example (if any)
-	string example;
+	//! Function description
+	vector<FunctionDescription> descriptions;
 
 	DUCKDB_API void CopyFunctionProperties(CreateFunctionInfo &other) const;
 };
