@@ -1,5 +1,5 @@
 DUCKDB_REPO=https://github.com/duckdb/duckdb.git
-DUCKDB_REF=c29c67bb971362cd1e9143305acffebb1bc9bd63
+DUCKDB_REF=43c9d167d0a6c22c9d0afed9fba7ae363b32f166
 
 SUBSTRAIT_REPO=https://github.com/substrait-io/duckdb-substrait-extension.git
 SUBSTRAIT_BRANCH=main
@@ -23,7 +23,6 @@ CORE_COMMAND =  \
 	MACOSX_DEPLOYMENT_TARGET=11.0 cmake -DBUILD_EXTENSIONS="icu;parquet;tpch;tpcds;json" -DBUILD_ONLY_EXTENSIONS=TRUE .. && \
 	MACOSX_DEPLOYMENT_TARGET=11.0 CC="${CC}" CXX="${CXX}" CFLAGS="${CFLAGS}" CXXFLAGS="${CXXFLAGS}" ${DUCKDB_COMMON_BUILD_FLAGS} make icu_extension tpch_extension tpcds_extension json_extension parquet_extension -j 2 && \
 	cd ../.. && \
-	cp duckdb/build/third_party/mbedtls/libduckdb_mbedtls.a deps/$(DEP_NAME) && \
 	find duckdb/build/ -type f -name '*extension*.a' -exec cp {} deps/$(DEP_NAME) \;
 
 SUBSTRAIT_COMMAND = \
