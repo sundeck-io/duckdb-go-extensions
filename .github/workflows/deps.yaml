@@ -1,11 +1,17 @@
 name: Build static library dependencies
 on:
-  pull_request:
+  push:
     paths:
       - ".github/workflows/**"
       - "Makefile"
+
+concurrency:
+  group: ${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   headers:
+    if: ${{ github.repository != 'sundeck-io/duckdb-go-extensions' }}
     runs-on: ubuntu-20.04
     steps:
       - uses: actions/checkout@v4
