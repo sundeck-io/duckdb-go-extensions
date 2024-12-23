@@ -116,8 +116,9 @@ jobs:
         uses: actions/setup-go@v4
         with:
           go-version-file: 'go.mod'
-      - name: Run tests
-        run: go test ./...        
+      # disabled for now because it is running on cross compiled machine.
+      # - name: Run tests
+      #   run: go test ./...        
       - uses: actions/upload-artifact@v4
         with:
           name: linux_arm64_${{ matrix.build_type.name }}
