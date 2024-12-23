@@ -5,17 +5,13 @@ go 1.23
 toolchain go1.23.1
 
 require (
-	github.com/go-redis/redis/v8 v8.11.5
 	github.com/marcboeker/go-duckdb v1.8.1
 	github.com/stretchr/testify v1.9.0
 )
 
 require (
 	github.com/apache/arrow-go/v18 v18.0.0 // indirect
-	github.com/apache/arrow/go/v17 v17.0.0 // indirect
-	github.com/cespare/xxhash/v2 v2.1.2 // indirect
 	github.com/davecgh/go-spew v1.1.1 // indirect
-	github.com/dgryski/go-rendezvous v0.0.0-20200823014737-9f7001d12a5f // indirect
 	github.com/goccy/go-json v0.10.3 // indirect
 	github.com/google/flatbuffers v24.3.25+incompatible // indirect
 	github.com/google/uuid v1.6.0 // indirect
@@ -34,4 +30,4 @@ require (
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 )
 
-replace github.com/marcboeker/go-duckdb => github.com/sundeck-io/go-duckdb-latest v0.0.0-20241219075846-7f395272e5da
+replace github.com/marcboeker/go-duckdb => github.com/sundeck-io/go-duckdb-latest v0.0.0-20241223012723-08190885e7b4
