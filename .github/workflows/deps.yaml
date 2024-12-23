@@ -1,9 +1,6 @@
 name: Build static library dependencies
 on:
-  workflow_dispatch:
-  push:
-    branches-ignore:
-      - main
+  pull_request:
     paths:
       - ".github/workflows/**"
       - "Makefile"
@@ -109,6 +106,12 @@ jobs:
           BUILD_CORE: ${{ matrix.build_type.BUILD_CORE }}
           BUILD_SUBSTRAIT: ${{ matrix.build_type.BUILD_SUBSTRAIT }}
         run: make deps.linux.arm64
+      - name: Set up Go
+        uses: actions/setup-go@v4
+        with:
+          go-version-file: 'go.mod'
+      - name: Run tests
+        run: go test ./...        
       - uses: actions/upload-artifact@v4
         with:
           name: linux_arm64_${{ matrix.build_type.name }}
