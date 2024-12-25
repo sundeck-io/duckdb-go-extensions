@@ -41,6 +41,11 @@ jobs:
           BUILD_CORE: ${{ matrix.build_type.BUILD_CORE }}
           BUILD_SUBSTRAIT: ${{ matrix.build_type.BUILD_SUBSTRAIT }}
         run: make deps.darwin.amd64
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: 'go.mod'
+      - name: "Run tests"
+        run: go test ./...       
       - uses: actions/upload-artifact@v4
         with:
           name: darwin_amd64_${{ matrix.build_type.name }}
@@ -63,6 +68,11 @@ jobs:
           BUILD_CORE: ${{ matrix.build_type.BUILD_CORE }}
           BUILD_SUBSTRAIT: ${{ matrix.build_type.BUILD_SUBSTRAIT }}
         run: make deps.darwin.arm64
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: 'go.mod'
+      - name: "Run tests"
+        run: go test ./...           
       - uses: actions/upload-artifact@v4
         with:
           name: darwin_arm64_${{ matrix.build_type.name }}
@@ -85,6 +95,11 @@ jobs:
           BUILD_CORE: ${{ matrix.build_type.BUILD_CORE }}
           BUILD_SUBSTRAIT: ${{ matrix.build_type.BUILD_SUBSTRAIT }}
         run: make deps.linux.amd64
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: 'go.mod'
+      - name: "Run tests"
+        run: go test ./...           
       - uses: actions/upload-artifact@v4
         with:
           name: linux_amd64_${{ matrix.build_type.name }}
