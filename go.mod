@@ -4,6 +4,7 @@ go 1.23
 
 toolchain go1.23.1
 
+
 require (
 	github.com/marcboeker/go-duckdb v1.8.1
 	github.com/stretchr/testify v1.9.0
@@ -30,4 +31,4 @@ require (
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 )
 
-replace github.com/marcboeker/go-duckdb => github.com/sundeck-io/go-duckdb-latest v0.0.0-20241223012723-08190885e7b4
+replace github.com/marcboeker/go-duckdb => github.com/sundeck-io/go-duckdb-latest v0.0.0-20241225070914-a700bdb14577
