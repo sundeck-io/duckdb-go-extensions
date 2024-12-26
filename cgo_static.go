@@ -4,7 +4,10 @@ package duckdb_go_extensions
 
 ////-lsubstrait_extension
 /*
-#cgo LDFLAGS: -licu_extension -ltpch_extension -ltpcds_extension -lsubstrait_extension
+#cgo !core,!substrait LDFLAGS: -licu_extension -ltpch_extension -ltpcds_extension -lsubstrait_extension
+#cgo core,!substrait LDFLAGS: -licu_extension -ltpch_extension -ltpcds_extension
+#cgo !core,substrait LDFLAGS: -lsubstrait_extension
+
 #cgo darwin,amd64 LDFLAGS: -lc++ -L${SRCDIR}/deps/darwin_amd64
 #cgo darwin,arm64 LDFLAGS: -lc++ -L${SRCDIR}/deps/darwin_arm64
 #cgo linux,amd64 LDFLAGS: -lstdc++ -lm -ldl -L${SRCDIR}/deps/linux_amd64

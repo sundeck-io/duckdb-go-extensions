@@ -45,7 +45,7 @@ jobs:
         with:
           go-version-file: 'go.mod'
       - name: "Run tests"
-        run: go test ./...       
+        run: go test -tags=${{ matrix.build_type.name }} ./...       
       - uses: actions/upload-artifact@v4
         with:
           name: darwin_amd64_${{ matrix.build_type.name }}
@@ -72,7 +72,7 @@ jobs:
         with:
           go-version-file: 'go.mod'
       - name: "Run tests"
-        run: go test ./...           
+        run: go test -tags=${{ matrix.build_type.name }} ./...           
       - uses: actions/upload-artifact@v4
         with:
           name: darwin_arm64_${{ matrix.build_type.name }}
@@ -99,7 +99,7 @@ jobs:
         with:
           go-version-file: 'go.mod'
       - name: "Run tests"
-        run: go test ./...           
+        run: go test -tags=${{ matrix.build_type.name }}  ./...          
       - uses: actions/upload-artifact@v4
         with:
           name: linux_amd64_${{ matrix.build_type.name }}
