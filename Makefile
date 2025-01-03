@@ -60,6 +60,7 @@ duckdb:
 substrait:
 	rm -rf substrait
 	git clone -b $(SUBSTRAIT_BRANCH) --depth 1 $(SUBSTRAIT_REPO) --recurse-submodules substrait
+	cd substrait/duckdb && git fetch --depth 1 origin $(DUCKDB_REF) && git checkout $(DUCKDB_REF)
 
 .PHONY: deps.header
 deps.header: duckdb substrait
