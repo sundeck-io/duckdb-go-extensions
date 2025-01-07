@@ -1,5 +1,5 @@
 DUCKDB_REPO=https://github.com/duckdb/duckdb.git
-DUCKDB_REF=43c9d167d0a6c22c9d0afed9fba7ae363b32f166
+DUCKDB_REF=c29c67bb971362cd1e9143305acffebb1bc9bd63
 
 SUBSTRAIT_REPO=https://github.com/substrait-io/duckdb-substrait-extension.git
 SUBSTRAIT_BRANCH=main
@@ -60,6 +60,7 @@ duckdb:
 substrait:
 	rm -rf substrait
 	git clone -b $(SUBSTRAIT_BRANCH) --depth 1 $(SUBSTRAIT_REPO) --recurse-submodules substrait
+	cd substrait/duckdb && git fetch --depth 1 origin $(DUCKDB_REF) && git checkout $(DUCKDB_REF)
 
 .PHONY: deps.header
 deps.header: duckdb substrait
