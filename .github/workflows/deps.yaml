@@ -122,7 +122,8 @@ jobs:
     needs: [headers, darwin_amd64, darwin_arm64, linux_amd64, linux_arm64]
     strategy:
       matrix:
-        os: [ubuntu-latest, macos-latest, macos-13]
+        fail-fast: false
+        os: [ubuntu-latest, macos-latest, macos-13, ryan, ubuntu-20.04]
     steps:
       - uses: actions/checkout@v4
         with:
@@ -172,7 +173,6 @@ jobs:
         with:
           name: linux_arm64_substrait
           path: deps/linux_arm64
-          steps:
       - uses: actions/setup-go@v5
         with:
           go-version-file: 'go.mod'
