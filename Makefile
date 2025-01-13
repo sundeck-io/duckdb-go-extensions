@@ -1,111 +1,105 @@
 DUCKDB_REPO=https://github.com/duckdb/duckdb.git
-DUCKDB_REF=43c9d167d0a6c22c9d0afed9fba7ae363b32f166
-
-SUBSTRAIT_REPO=https://github.com/substrait-io/duckdb-substrait-extension.git
-SUBSTRAIT_BRANCH=main
+DUCKDB_REF=ab8c90985741ac68cd203c8396022894c1771d4b
 
 CFLAGS   = -O3
 CXXFLAGS = -O3
 CC 		 = ""
 CXX      = ""
 DEP_NAME = ""
+VCPKG_TARGET_TRIPLET = ""
+OSX_BUILD_ARCH = ""
 
-
-DUCKDB_COMMON_BUILD_FLAGS := BUILD_SHELL=0 BUILD_UNITTESTS=0 DUCKDB_PLATFORM=any
 
 CHECK_DARWIN = if [ "$(shell uname -s | tr '[:upper:]' '[:lower:]')" != "darwin" ]; then echo "Error: must run build on darwin"; false; fi
 CHECK_LINUX = if [ "$(shell uname -s | tr '[:upper:]' '[:lower:]')" != "linux" ]; then echo "Error: must run build on linux"; false; fi
 MKDIR_COMMAND = rm -rf deps/$(DEP_NAME) && mkdir -p deps/$(DEP_NAME)
 
+DUCKDB_COMMON_BUILD_FLAGS := BUILD_SHELL=0 DISABLE_SHELL=1 STATIC_LIBCPP=0 BUILD_UNITTESTS=0 DUCKDB_PLATFORM=any ENABLE_EXTENSION_AUTOLOADING=1 ENABLE_EXTENSION_AUTOINSTALL=1 SKIP_SUBSTRAIT_C_TESTS=true USE_MERGED_VCPKG_MANIFEST=1 VCPKG_TOOLCHAIN_PATH=${VCPKG_ROOT}/scripts/buildsystems/vcpkg.cmake 
+
 CORE_COMMAND =  \
 	cd duckdb && \
-	mkdir build && \
-	cd build && \
-	MACOSX_DEPLOYMENT_TARGET=11.0 cmake -DBUILD_EXTENSIONS="icu;parquet;tpch;tpcds;json" -DBUILD_ONLY_EXTENSIONS=TRUE .. && \
-	MACOSX_DEPLOYMENT_TARGET=11.0 CC="${CC}" CXX="${CXX}" CFLAGS="${CFLAGS}" CXXFLAGS="${CXXFLAGS}" ${DUCKDB_COMMON_BUILD_FLAGS} make icu_extension tpch_extension tpcds_extension json_extension parquet_extension -j 2 && \
-	cd ../.. && \
-	find duckdb/build/ -type f -name '*extension*.a' -exec cp {} deps/$(DEP_NAME) \;
+	${DUCKDB_COMMON_BUILD_FLAGS} make extension_configuration bundle-library -j 2 && \
+	cd ../ && \
+	cp duckdb/build/release/src/libduckdb.* deps/${DEP_NAME}/ && \
+	find duckdb/build/release/repository -name '*.duckdb_extension' -exec cp {} deps/${DEP_NAME}/ \;
 
-SUBSTRAIT_COMMAND = \
-	cd substrait && \
-	MACOSX_DEPLOYMENT_TARGET=11.0 CC="${CC}" CXX="${CXX}" CFLAGS="${CFLAGS}" CXXFLAGS="${CXXFLAGS}" ${DUCKDB_COMMON_BUILD_FLAGS} make -j 2 && \
-	cd .. && \
-	cp substrait/build/release/extension/substrait/libsubstrait_extension.a deps/$(DEP_NAME)
 
-PRE_COMPILE_TARGETS :=
-
-# Add
-ifneq ($(BUILD_CORE),false)
-PRE_COMPILE_TARGETS += duckdb
+OS := $(shell uname -s | tr '[:upper:]' '[:lower:]')  # Get OS name in lowercase
+ARCH := $(shell uname -m)
+COS := $(strip $(OS))
+ifeq ($(ARCH),x86_64)
+  ARCH := amd64
+else ifeq ($(ARCH),aarch64)
+  ARCH := arm64
 endif
 
-ifneq ($(BUILD_SUBSTRAIT),false)
-PRE_COMPILE_TARGETS += substrait
-endif
 
-define get_build_commands
-$(MKDIR_COMMAND)
-$(if $(filter TRUE,$(or $(BUILD_CORE),TRUE)), $(CORE_COMMAND))
-$(if $(filter TRUE,$(or $(BUILD_SUBSTRAIT),TRUE)), $(SUBSTRAIT_COMMAND))
-endef
+.PHONY: test
+test:
+	CGO_LDFLAGS="-L$(PWD)/deps/$(COS)_$(ARCH)/ -Wl,-rpath -Wl,$$ORIGIN/deps/$(COS)_$(ARCH)/" DYLD_LIBRARY_PATH=$(PWD)/deps/$(COS)_$(ARCH) LD_LIBRARY_PATH=$(PWD)/deps/$(COS)_$(ARCH) go test -tags duckdb_use_lib github.com/marcboeker/go-duckdb/... -run '^TestOpen$\' duckdb_test.go
+	CGO_LDFLAGS="-L$(PWD)/deps/$(COS)_$(ARCH)/ -Wl,-rpath -Wl,$$ORIGIN/deps/$(COS)_$(ARCH)/" DYLD_LIBRARY_PATH=$(PWD)/deps/$(COS)_$(ARCH) LD_LIBRARY_PATH=$(PWD)/deps/$(COS)_$(ARCH) go test -tags duckdb_use_lib ./ -run '^TestExtensions$\' extensions_test.go
+
+.PHONY: test.linux.arm64
+test.linux.arm64: CC = aarch64-linux-gnu-gcc
+test.linux.arm64: CXX = aarch64-linux-gnu-g++
+test.linux.amd64:
+	CGO_LDFLAGS="-L$(PWD)/deps/linux_arm64/ -Wl,-rpath -Wl,$$ORIGIN/deps/linux_arm64/" go test -tags duckdb_use_lib github.com/marcboeker/go-duckdb/... -run '^TestOpen$\' duckdb_test.go
+	CGO_LDFLAGS="-L$(PWD)/deps/linux_arm64/ -Wl,-rpath -Wl,$$ORIGIN/deps/linux_arm64/" go test -tags duckdb_use_lib ./ -run '^TestExtensions$\' extensions_test.go
 
 .PHONY: duckdb
 duckdb:
 	rm -rf duckdb
 	git clone --depth 1 $(DUCKDB_REPO) duckdb
 	cd duckdb && git fetch --depth 1 origin $(DUCKDB_REF) && git checkout $(DUCKDB_REF)
-
-
-.PHONY: substrait
-substrait:
-	rm -rf substrait
-	git clone -b $(SUBSTRAIT_BRANCH) --depth 1 $(SUBSTRAIT_REPO) --recurse-submodules substrait
+	cp extension_config_local.cmake duckdb/extension/extension_config.cmake
 
 .PHONY: deps.header
-deps.header: duckdb substrait
+deps.header: duckdb
 	mkdir -p include
-	cp substrait/src/include/substrait_extension.hpp include/
-	cp duckdb/extension/icu/include/icu_extension.hpp include/
-	cp duckdb/extension/json/include/json_extension.hpp include/
-	cp duckdb/extension/tpch/include/tpch_extension.hpp include/
-	cp duckdb/extension/tpcds/include/tpcds_extension.hpp include/
-	cp duckdb/extension/parquet/include/parquet_extension.hpp include/
+	find duckdb/extension -name '*_extension.hpp' -exec cp {} include/ \;
+	cd duckdb && make extension_configuration && cd ../ && find duckdb/build/extension_configuration/_deps -name '*_extension.hpp' -exec cp {} include/ \;
 	sed '/#include "duckdb\/main\/client_context.hpp"/d' include/tpcds_extension.hpp > temp_file && mv temp_file include/tpcds_extension.hpp
 	cd duckdb && python3 scripts/amalgamation.py
 	cp duckdb/src/amalgamation/duckdb.hpp include/
 
 
 .PHONY: deps.darwin.amd64
-deps.darwin.amd64: CC = clang
-deps.darwin.amd64: CXX = clang++
 deps.darwin.amd64: CFLAGS += -target x86_64-apple-macos11
 deps.darwin.amd64: CXXFLAGS += -target x86_64-apple-macos11
 deps.darwin.amd64: DEP_NAME = darwin_amd64
-deps.darwin.amd64: $(PRE_COMPILE_TARGETS)
+deps.darwin.amd64: VCPKG_TARGET_TRIPLET = x64-osx
+deps.darwin.amd64: OSX_BUILD_ARCH = x86_64
+deps.darwin.amd64: duckdb
 	$(CHECK_DARWIN)
-	$(get_build_commands)
+	$(MKDIR_COMMAND)
+	$(CORE_COMMAND)
 
 .PHONY: deps.darwin.arm64
-deps.darwin.arm64: CC = clang
-deps.darwin.arm64: CXX = clang++
-deps.darwin.arm64: CFLAGS += -target arm64-apple-macos11
-deps.darwin.arm64: CXXFLAGS += -target arm64-apple-macos11
+deps.darwin.arm64: CFLAGS += -target x86_64-apple-macos11
+deps.darwin.arm64: CXXFLAGS += -target x86_64-apple-macos11
 deps.darwin.arm64: DEP_NAME = darwin_arm64
-deps.darwin.arm64: $(PRE_COMPILE_TARGETS)
+deps.darwin.arm64: VCPKG_TARGET_TRIPLET = arm64-osx
+deps.darwin.arm64: OSX_BUILD_ARCH = arm64
+deps.darwin.arm64: duckdb
 	$(CHECK_DARWIN)
-	$(get_build_commands)
+	$(MKDIR_COMMAND)
+	$(CORE_COMMAND)
 
 .PHONY: deps.linux.amd64
 deps.linux.amd64: DEP_NAME = linux_amd64
-deps.linux.amd64: $(PRE_COMPILE_TARGETS)
+deps.linux.amd64: VCPKG_TARGET_TRIPLET = x64-linux
+deps.linux.amd64: duckdb
 	$(CHECK_LINUX)
-	$(get_build_commands)
+	$(MKDIR_COMMAND)
+	$(CORE_COMMAND)
 
 .PHONY: deps.linux.arm64
 deps.linux.arm64: CC = aarch64-linux-gnu-gcc
 deps.linux.arm64: CXX = aarch64-linux-gnu-g++
 deps.linux.arm64: DEP_NAME = linux_arm64
-deps.linux.arm64: $(PRE_COMPILE_TARGETS)
+deps.linux.arm64: VCPKG_TARGET_TRIPLET = arm64-linux
+deps.linux.arm64: duckdb
 	$(CHECK_LINUX)
-	$(get_build_commands)
+	$(MKDIR_COMMAND)
+	$(CORE_COMMAND)
 

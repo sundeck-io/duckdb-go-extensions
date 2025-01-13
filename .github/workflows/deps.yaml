@@ -1,9 +1,17 @@
 name: Build static library dependencies
 on:
   push:
+    branches: [main]
     paths:
       - ".github/workflows/**"
       - "Makefile"
+      - "extension_config_local.cmake"
+  pull_request:
+    types: [opened, synchronize, reopened]
+    paths:
+      - ".github/workflows/**"
+      - "Makefile"
+      - "extension_config_local.cmake"
 
 concurrency:
   group: ${{ github.ref }}
@@ -11,7 +19,6 @@ concurrency:
 
 jobs:
   headers:
-    if: ${{ github.repository != 'sundeck-io/duckdb-go-extensions' }}
     runs-on: ubuntu-20.04
     steps:
       - uses: actions/checkout@v4
@@ -27,97 +34,158 @@ jobs:
 
   darwin_amd64:
     runs-on: macos-13
-    strategy:
-      matrix:
-        build_type:
-          - { name: 'core', BUILD_CORE: 'TRUE', BUILD_SUBSTRAIT: 'FALSE' }
-          - { name: 'substrait', BUILD_CORE: 'FALSE', BUILD_SUBSTRAIT: 'TRUE' }
     steps:
       - uses: actions/checkout@v4
         with:
           ref: ${{ github.head_ref }}
+      - name: Install Ninja
+        run: |
+          brew install ninja autoconf make libtool automake autoconf-archive
+      - name: Setup Ccache
+        uses: hendrikmuhs/ccache-action@main
+        continue-on-error: true
+        with:
+          key: extension-distribution-amd64-osx
+      - name: vcpkg build
+        uses: lukka/run-vcpkg@v11
+        with:
+          vcpkgGitCommitId: "5e5d0e1cd7785623065e77eff011afdeec1a3574"
       - shell: bash
         env:
-          BUILD_CORE: ${{ matrix.build_type.BUILD_CORE }}
-          BUILD_SUBSTRAIT: ${{ matrix.build_type.BUILD_SUBSTRAIT }}
+          VCPKG_ROOT: ${{ github.workspace }}/vcpkg
+          GEN: ninja
         run: make deps.darwin.amd64
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: 'go.mod'
+      - name: "Run go-duckdb tests"
+        env:
+          DYLD_LIBRARY_PATH: deps/darwin_amd64
+        run: make test
       - uses: actions/upload-artifact@v4
         with:
-          name: darwin_amd64_${{ matrix.build_type.name }}
+          name: darwin_amd64
           path: deps/darwin_amd64/*
           retention-days: 1
-
   darwin_arm64:
     runs-on: macos-latest
-    strategy:
-      matrix:
-        build_type:
-          - { name: 'core', BUILD_CORE: 'TRUE', BUILD_SUBSTRAIT: 'FALSE' }
-          - { name: 'substrait', BUILD_CORE: 'FALSE', BUILD_SUBSTRAIT: 'TRUE' }
     steps:
       - uses: actions/checkout@v4
         with:
           ref: ${{ github.head_ref }}
+      - name: Install Ninja
+        run: |
+          brew install ninja autoconf make libtool automake autoconf-archive
+      - name: Setup Ccache
+        uses: hendrikmuhs/ccache-action@main
+        continue-on-error: true
+        with:
+          key: extension-distribution-arm64-osx
+      - name: vcpkg build
+        uses: lukka/run-vcpkg@v11
+        with:
+          vcpkgGitCommitId: "5e5d0e1cd7785623065e77eff011afdeec1a3574"
       - shell: bash
         env:
-          BUILD_CORE: ${{ matrix.build_type.BUILD_CORE }}
-          BUILD_SUBSTRAIT: ${{ matrix.build_type.BUILD_SUBSTRAIT }}
+          VCPKG_ROOT: ${{ github.workspace }}/vcpkg
+          GEN: ninja
         run: make deps.darwin.arm64
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: 'go.mod'
+      - name: "Run go-duckdb tests"
+        env:
+          DYLD_LIBRARY_PATH: deps/darwin_arm64
+        run: make test
       - uses: actions/upload-artifact@v4
         with:
-          name: darwin_arm64_${{ matrix.build_type.name }}
+          name: darwin_arm64
           path: deps/darwin_arm64/*
           retention-days: 1
-
   linux_amd64:
     runs-on: ubuntu-20.04
-    strategy:
-      matrix:
-        build_type:
-          - { name: 'core', BUILD_CORE: 'TRUE', BUILD_SUBSTRAIT: 'FALSE' }
-          - { name: 'substrait', BUILD_CORE: 'FALSE', BUILD_SUBSTRAIT: 'TRUE' }
     steps:
       - uses: actions/checkout@v4
         with:
           ref: ${{ github.head_ref }}
+      - uses: seanmiddleditch/gha-setup-ninja@master
+      - name: Setup Ccache
+        uses: hendrikmuhs/ccache-action@main
+        continue-on-error: true
+        with:
+          key: extension-distribution-amd64-linux
+      - name: vcpkg build
+        uses: lukka/run-vcpkg@v11
+        with:
+          vcpkgGitCommitId: "5e5d0e1cd7785623065e77eff011afdeec1a3574"
       - shell: bash
         env:
-          BUILD_CORE: ${{ matrix.build_type.BUILD_CORE }}
-          BUILD_SUBSTRAIT: ${{ matrix.build_type.BUILD_SUBSTRAIT }}
+          VCPKG_ROOT: ${{ github.workspace }}/vcpkg
+          GEN: ninja
         run: make deps.linux.amd64
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: 'go.mod'
+      - name: "Run go-duckdb tests"
+        env:
+          LD_LIBRARY_PATH: deps/linux_amd64
+        run: make test
       - uses: actions/upload-artifact@v4
         with:
-          name: linux_amd64_${{ matrix.build_type.name }}
+          name: linux_amd64
           path: deps/linux_amd64/*
           retention-days: 1
-
   linux_arm64:
     runs-on: ubuntu-20.04
-    strategy:
-      matrix:
-        build_type:
-          - { name: 'core', BUILD_CORE: 'TRUE', BUILD_SUBSTRAIT: 'FALSE' }
-          - { name: 'substrait', BUILD_CORE: 'FALSE', BUILD_SUBSTRAIT: 'TRUE' }
     steps:
       - uses: actions/checkout@v4
         with:
           ref: ${{ github.head_ref }}
+      - uses: seanmiddleditch/gha-setup-ninja@master
       - name: Install cross compile toolchain
         shell: bash
         run: |
           sudo apt update
           sudo apt install -y gcc-aarch64-linux-gnu g++-aarch64-linux-gnu
+      - name: Setup Ccache
+        uses: hendrikmuhs/ccache-action@main
+        continue-on-error: true
+        with:
+          key: extension-distribution-arm64-linux
+      - name: vcpkg build
+        uses: lukka/run-vcpkg@v11
+        with:
+          vcpkgGitCommitId: "5e5d0e1cd7785623065e77eff011afdeec1a3574"
       - shell: bash
         env:
-          BUILD_CORE: ${{ matrix.build_type.BUILD_CORE }}
-          BUILD_SUBSTRAIT: ${{ matrix.build_type.BUILD_SUBSTRAIT }}
-        run: make deps.linux.arm64     
+          VCPKG_ROOT: ${{ github.workspace }}/vcpkg
+          GEN: ninja
+        run: make deps.linux.arm64
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: 'go.mod'
+      - name: build chroot
+        continue-on-error: true
+        run: |
+          sudo apt install qemu-user-static debootstrap binfmt-support
+          sudo mkdir -p /usr/aarch64-linux-gnu
+          sudo debootstrap --arch=arm64 focal /usr/aarch64-linux-gnu http://ports.ubuntu.com/
+      - name: "Run go-duckdb tests"
+        env:
+          CGO_LDFLAGS: "-Ldeps/linux_arm64 -Wl,-rpath,$ORIGIN/deps/linux_arm64" 
+          CGO_ENABLED: 1
+          LD_LIBRARY_PATH: "/usr/aarch64-linux-gnu/lib64:dps/linux_arm64"
+          QEMU_LD_PREFIX: /usr/aarch64-linux-gnu/ 
+          GOOS: linux
+          GOARCH: arm64
+          CC: aarch64-linux-gnu-gcc
+          CXX: aarch64-linux-gnu-g++
+        run: make test.linux.arm64
       - uses: actions/upload-artifact@v4
         with:
-          name: linux_arm64_${{ matrix.build_type.name }}
+          name: linux_arm64
           path: deps/linux_arm64/*
           retention-days: 1
-
   commit:
     runs-on: ubuntu-latest
     needs: [headers, darwin_amd64, darwin_arm64, linux_amd64, linux_arm64]
@@ -131,8 +199,6 @@ jobs:
           rm -f deps/darwin_arm64/*
           rm -f deps/linux_amd64/*
           rm -f deps/linux_arm64/*
-          rm -f deps/freebsd_amd64/*
-          rm -f deps/windows_amd64/*
           rm -rf include/*
       - uses: actions/download-artifact@v4
         with:
@@ -140,35 +206,19 @@ jobs:
           path: include
       - uses: actions/download-artifact@v4
         with:
-          name: darwin_amd64_core
+          name: darwin_amd64
           path: deps/darwin_amd64
       - uses: actions/download-artifact@v4
         with:
-          name: darwin_amd64_substrait
-          path: deps/darwin_amd64
-      - uses: actions/download-artifact@v4
-        with:
-          name: darwin_arm64_core
+          name: darwin_arm64
           path: deps/darwin_arm64
       - uses: actions/download-artifact@v4
         with:
-          name: darwin_arm64_substrait
-          path: deps/darwin_arm64
-      - uses: actions/download-artifact@v4
-        with:
-          name: linux_amd64_core
+          name: linux_amd64
           path: deps/linux_amd64
       - uses: actions/download-artifact@v4
         with:
-          name: linux_amd64_substrait
-          path: deps/linux_amd64
-      - uses: actions/download-artifact@v4
-        with:
-          name: linux_arm64_core
-          path: deps/linux_arm64
-      - uses: actions/download-artifact@v4
-        with:
-          name: linux_arm64_substrait
+          name: linux_arm64
           path: deps/linux_arm64
       - name: Push static libraries
         uses: stefanzweifel/git-auto-commit-action@v5
