@@ -160,6 +160,8 @@ jobs:
         env:
           VCPKG_ROOT: ${{ github.workspace }}/vcpkg
           GEN: ninja
+          CC: aarch64-linux-gnu-gcc
+          CXX: aarch64-linux-gnu-g++
         run: make deps.linux.arm64
       - uses: actions/setup-go@v5
         with:
@@ -174,7 +176,7 @@ jobs:
         env:
           CGO_LDFLAGS: "-Ldeps/linux_arm64 -Wl,-rpath,$ORIGIN/deps/linux_arm64" 
           CGO_ENABLED: 1
-          LD_LIBRARY_PATH: "/usr/aarch64-linux-gnu/lib64:dps/linux_arm64"
+          LD_LIBRARY_PATH: "/usr/aarch64-linux-gnu/lib64:deps/linux_arm64"
           QEMU_LD_PREFIX: /usr/aarch64-linux-gnu/ 
           GOOS: linux
           GOARCH: arm64
