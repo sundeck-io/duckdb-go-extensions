@@ -22,8 +22,6 @@ jobs:
     runs-on: ubuntu-20.04
     steps:
       - uses: actions/checkout@v4
-        with:
-          ref: ${{ github.head_ref }}
       - shell: bash
         run: make deps.header
       - uses: actions/upload-artifact@v4
@@ -36,8 +34,6 @@ jobs:
     runs-on: macos-13
     steps:
       - uses: actions/checkout@v4
-        with:
-          ref: ${{ github.head_ref }}
       - name: Install Ninja
         run: |
           brew install ninja autoconf make libtool automake autoconf-archive
@@ -71,8 +67,6 @@ jobs:
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
-        with:
-          ref: ${{ github.head_ref }}
       - name: Install Ninja
         run: |
           brew install ninja autoconf make libtool automake autoconf-archive
@@ -106,8 +100,6 @@ jobs:
     runs-on: ubuntu-20.04
     steps:
       - uses: actions/checkout@v4
-        with:
-          ref: ${{ github.head_ref }}
       - uses: seanmiddleditch/gha-setup-ninja@master
       - name: Setup Ccache
         uses: hendrikmuhs/ccache-action@main
@@ -139,8 +131,6 @@ jobs:
     runs-on: ubuntu-20.04
     steps:
       - uses: actions/checkout@v4
-        with:
-          ref: ${{ github.head_ref }}
       - uses: seanmiddleditch/gha-setup-ninja@master
       - name: Install cross compile toolchain
         shell: bash
@@ -193,8 +183,6 @@ jobs:
     needs: [headers, darwin_amd64, darwin_arm64, linux_amd64, linux_arm64]
     steps:
       - uses: actions/checkout@v4
-        with:
-          ref: ${{ github.head_ref }}
       - shell: bash
         run: |
           rm -f deps/darwin_amd64/*
