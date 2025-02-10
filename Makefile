@@ -1,5 +1,5 @@
 DUCKDB_REPO=https://github.com/duckdb/duckdb.git
-DUCKDB_REF=ab8c90985741ac68cd203c8396022894c1771d4b
+DUCKDB_REF=5f5512b827df6397afd31daedb4bbdee76520019
 
 CFLAGS   = -O3
 CXXFLAGS = -O3
