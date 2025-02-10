@@ -19,7 +19,7 @@ duckdb_extension_load(tpch)
 duckdb_extension_load(tpcds)
 duckdb_extension_load(substrait
     GIT_URL https://github.com/substrait-io/duckdb-substrait-extension
-    GIT_TAG 52a0db8f14b4000ec031ca65671f7b2057327a57
+    GIT_TAG a1b341cc3df16c55535c12acce375040ffe50347
 )
 duckdb_extension_load(iceberg
     GIT_URL https://github.com/duckdb/duckdb-iceberg
