@@ -12,14 +12,14 @@ duckdb_extension_load(aws
 )
 duckdb_extension_load(httpfs
     GIT_URL https://github.com/duckdb/duckdb-httpfs
-    GIT_TAG 84fb5f0c38b3ed7ce32420e073c280d4c264f3e8
+    GIT_TAG 85ac4667bcb0d868199e156f8dd918b0278db7b9
     INCLUDE_DIR extension/httpfs/include
 )
 duckdb_extension_load(tpch)
 duckdb_extension_load(tpcds)
 duckdb_extension_load(substrait
     GIT_URL https://github.com/substrait-io/duckdb-substrait-extension
-    GIT_TAG cb02e57152cebb2087e1a673292dfa69a1e050ca
+    GIT_TAG a1b341cc3df16c55535c12acce375040ffe50347
 )
 duckdb_extension_load(iceberg
     GIT_URL https://github.com/duckdb/duckdb-iceberg
