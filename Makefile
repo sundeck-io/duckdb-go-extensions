@@ -57,7 +57,7 @@ duckdb:
 deps.header: duckdb
 	mkdir -p include
 	find duckdb/extension -name '*_extension.hpp' -exec cp {} include/ \;
-	cd duckdb && make debug extension_configuration && cd ../ && find duckdb/build/extension_configuration/_deps -name '*_extension.hpp' -exec cp {} include/ \;
+	cd duckdb && make extension_configuration && cd ../ && find duckdb/build/extension_configuration/_deps -name '*_extension.hpp' -exec cp {} include/ \;
 	sed '/#include "duckdb\/main\/client_context.hpp"/d' include/tpcds_extension.hpp > temp_file && mv temp_file include/tpcds_extension.hpp
 	cd duckdb && python3 scripts/amalgamation.py
 	cp duckdb/src/amalgamation/duckdb.hpp include/
