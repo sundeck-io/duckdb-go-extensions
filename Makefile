@@ -1,8 +1,8 @@
 DUCKDB_REPO=https://github.com/duckdb/duckdb.git
 DUCKDB_REF=ab8c90985741ac68cd203c8396022894c1771d4b
 
-CFLAGS   = -O3
-CXXFLAGS = -O3
+CFLAGS   = -O2 -g -fsanitize=address -fno-omit-frame-pointer
+CXXFLAGS = -O2 -g -fsanitize=address -fno-omit-frame-pointer
 CC 		 = ""
 CXX      = ""
 DEP_NAME = ""
@@ -18,10 +18,10 @@ DUCKDB_COMMON_BUILD_FLAGS := BUILD_SHELL=0 DISABLE_SHELL=1 STATIC_LIBCPP=0 BUILD
 
 CORE_COMMAND =  \
 	cd duckdb && \
-	CC=${CC} CXX=${CXX} VCPKG_TARGET_TRIPLET=${VCPKG_TARGET_TRIPLET} OSX_BUILD_ARCH=${OSX_BUILD_ARCH} ${DUCKDB_COMMON_BUILD_FLAGS} make extension_configuration bundle-library -j 2 && \
+	CC=${CC} CXX=${CXX} VCPKG_TARGET_TRIPLET=${VCPKG_TARGET_TRIPLET} OSX_BUILD_ARCH=${OSX_BUILD_ARCH} ${DUCKDB_COMMON_BUILD_FLAGS} make debug extension_configuration bundle-library -j 2 && \
 	cd ../ && \
-	cp duckdb/build/release/src/libduckdb.* deps/${DEP_NAME}/ && \
-	find duckdb/build/release/repository -name '*.duckdb_extension' -exec cp {} deps/${DEP_NAME}/ \;
+	cp duckdb/build/debug/src/libduckdb.* deps/${DEP_NAME}/ && \
+	find duckdb/build/debug/repository -name '*.duckdb_extension' -exec cp {} deps/${DEP_NAME}/ \;
 
 
 OS := $(shell uname -s | tr '[:upper:]' '[:lower:]')  # Get OS name in lowercase
@@ -57,7 +57,7 @@ duckdb:
 deps.header: duckdb
 	mkdir -p include
 	find duckdb/extension -name '*_extension.hpp' -exec cp {} include/ \;
-	cd duckdb && make extension_configuration && cd ../ && find duckdb/build/extension_configuration/_deps -name '*_extension.hpp' -exec cp {} include/ \;
+	cd duckdb && make debug extension_configuration && cd ../ && find duckdb/build/extension_configuration/_deps -name '*_extension.hpp' -exec cp {} include/ \;
 	sed '/#include "duckdb\/main\/client_context.hpp"/d' include/tpcds_extension.hpp > temp_file && mv temp_file include/tpcds_extension.hpp
 	cd duckdb && python3 scripts/amalgamation.py
 	cp duckdb/src/amalgamation/duckdb.hpp include/
