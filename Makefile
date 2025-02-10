@@ -18,7 +18,7 @@ DUCKDB_COMMON_BUILD_FLAGS := BUILD_SHELL=0 DISABLE_SHELL=1 STATIC_LIBCPP=0 BUILD
 
 CORE_COMMAND =  \
 	cd duckdb && \
-	CC=${CC} CXX=${CXX} VCPKG_TARGET_TRIPLET=${VCPKG_TARGET_TRIPLET} OSX_BUILD_ARCH=${OSX_BUILD_ARCH} ${DUCKDB_COMMON_BUILD_FLAGS} make debug extension_configuration bundle-library -j 2 && \
+	CC=${CC} CXX=${CXX} VCPKG_TARGET_TRIPLET=${VCPKG_TARGET_TRIPLET} OSX_BUILD_ARCH=${OSX_BUILD_ARCH} ${DUCKDB_COMMON_BUILD_FLAGS} make extension_configuration debug -j 2 && \
 	cd ../ && \
 	cp duckdb/build/debug/src/libduckdb.* deps/${DEP_NAME}/ && \
 	find duckdb/build/debug/repository -name '*.duckdb_extension' -exec cp {} deps/${DEP_NAME}/ \;
