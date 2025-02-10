@@ -1,8 +1,8 @@
 DUCKDB_REPO=https://github.com/duckdb/duckdb.git
 DUCKDB_REF=ab8c90985741ac68cd203c8396022894c1771d4b
 
-CFLAGS   = -O2 -g -fno-omit-frame-pointer
-CXXFLAGS = -O2 -g -fno-omit-frame-pointer
+CFLAGS   = -O0
+CXXFLAGS = -O0
 CC 		 = ""
 CXX      = ""
 DEP_NAME = ""
