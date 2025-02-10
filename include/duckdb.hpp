@@ -1,5 +1,5 @@
 /*
-Copyright 2018-2024 Stichting DuckDB Foundation
+Copyright 2018-2025 Stichting DuckDB Foundation
 
 Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files (the "Software"), to deal in the Software without restriction, including without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, and to permit persons to whom the Software is furnished to do so, subject to the following conditions:
 
@@ -140,8 +140,19 @@ using std::stringstream;
 
 
 
-#if (defined(DUCKDB_USE_STANDARD_ASSERT) || !defined(DEBUG)) && !defined(DUCKDB_FORCE_ASSERT) && !defined(__MVS__)
+// clang-format off
+#if ( \
+    /* Not a debug build */ \
+    !defined(DEBUG) && \
+    /* FORCE_ASSERT is not set (enables assertions even on release mode when set to true) */ \
+    !defined(DUCKDB_FORCE_ASSERT) && \
+    /* The project is not compiled for Microsoft Visual Studio */ \
+    !defined(__MVS__) \
+)
+// clang-format on
 
+//! On most builds, NDEBUG is defined, turning the assert call into a NO-OP
+//! Only the 'else' condition is supposed to check the assertions
 #include <assert.h>
 #define D_ASSERT assert
 namespace duckdb {
@@ -1772,6 +1783,12 @@ static inline T AlignValue(T n) {
 	return ((n + (val - 1)) / val) * val;
 }
 
+template<uintptr_t alignment>
+inline data_ptr_t AlignValue(data_ptr_t addr) {
+	static_assert((alignment & (alignment - 1)) == 0, "'alignment' has to be a power of 2");
+	return reinterpret_cast<data_ptr_t>((reinterpret_cast<uintptr_t>(addr) + alignment - 1) & ~(alignment - 1));
+}
+
 template<class T, T val=8>
 constexpr inline T AlignValueFloor(T n) {
 	return (n / val) * val;
@@ -2504,6 +2521,7 @@ enum class LogicalTypeId : uint8_t {
 };
 
 struct ExtraTypeInfo;
+struct ExtensionTypeInfo;
 
 struct aggregate_state_t; // NOLINT: mimic std casing
 
@@ -2593,11 +2611,11 @@ struct LogicalType {
 	DUCKDB_API void SetAlias(string alias);
 	DUCKDB_API bool HasAlias() const;
 	DUCKDB_API string GetAlias() const;
-	DUCKDB_API void SetModifiers(vector<Value> modifiers);
-	DUCKDB_API bool HasModifiers() const;
-	DUCKDB_API vector<Value> GetModifiersCopy() const;
-	DUCKDB_API optional_ptr<vector<Value>> GetModifiers();
-	DUCKDB_API optional_ptr<const vector<Value>> GetModifiers() const;
+
+	DUCKDB_API bool HasExtensionInfo() const;
+	DUCKDB_API optional_ptr<const ExtensionTypeInfo> GetExtensionInfo() const;
+	DUCKDB_API optional_ptr<ExtensionTypeInfo> GetExtensionInfo();
+	DUCKDB_API void SetExtensionInfo(unique_ptr<ExtensionTypeInfo> info);
 
 	//! Returns the maximum logical type when combining the two types - or throws an exception if combining is not possible
 	DUCKDB_API static LogicalType MaxLogicalType(ClientContext &context, const LogicalType &left, const LogicalType &right);
@@ -3674,7 +3692,7 @@ struct timestamp_tz_t : public timestamp_t { // NOLINT
 	}
 };
 
-enum class TimestampCastResult : uint8_t { SUCCESS, ERROR_INCORRECT_FORMAT, ERROR_NON_UTC_TIMEZONE };
+enum class TimestampCastResult : uint8_t { SUCCESS, ERROR_INCORRECT_FORMAT, ERROR_NON_UTC_TIMEZONE, ERROR_RANGE };
 
 //! The static Timestamp class holds helper functions for the timestamp types.
 class Timestamp {
@@ -3690,8 +3708,9 @@ public:
 	//! Convert a string where the offset can also be a time zone string: / [A_Za-z0-9/_]+/
 	//! If has_offset is true, then the result is an instant that was offset from UTC
 	//! If the tz is not empty, the result is still an instant, but the parts can be extracted and applied to the TZ
-	DUCKDB_API static bool TryConvertTimestampTZ(const char *str, idx_t len, timestamp_t &result, bool &has_offset,
-	                                             string_t &tz, optional_ptr<int32_t> nanos = nullptr);
+	DUCKDB_API static TimestampCastResult TryConvertTimestampTZ(const char *str, idx_t len, timestamp_t &result,
+	                                                            bool &has_offset, string_t &tz,
+	                                                            optional_ptr<int32_t> nanos = nullptr);
 	DUCKDB_API static TimestampCastResult TryConvertTimestamp(const char *str, idx_t len, timestamp_t &result,
 	                                                          optional_ptr<int32_t> nanos = nullptr);
 	DUCKDB_API static TimestampCastResult TryConvertTimestamp(const char *str, idx_t len, timestamp_ns_t &result);
@@ -3762,10 +3781,12 @@ public:
 	DUCKDB_API static bool TryParseUTCOffset(const char *str, idx_t &pos, idx_t len, int &hour_offset,
 	                                         int &minute_offset);
 
-	DUCKDB_API static string ConversionError(const string &str);
-	DUCKDB_API static string ConversionError(string_t str);
+	DUCKDB_API static string FormatError(const string &str);
+	DUCKDB_API static string FormatError(string_t str);
 	DUCKDB_API static string UnsupportedTimezoneError(const string &str);
 	DUCKDB_API static string UnsupportedTimezoneError(string_t str);
+	DUCKDB_API static string RangeError(const string &str);
+	DUCKDB_API static string RangeError(string_t str);
 };
 
 } // namespace duckdb
@@ -4210,6 +4231,8 @@ struct date_t { // NOLINT
 	} // NOLINT
 };
 
+enum class DateCastResult : uint8_t { SUCCESS, ERROR_INCORRECT_FORMAT, ERROR_RANGE };
+
 //! The Date class is a static class that holds helper functions for the Date type.
 class Date {
 public:
@@ -4254,8 +4277,8 @@ public:
 	DUCKDB_API static bool TryConvertDateSpecial(const char *buf, idx_t len, idx_t &pos, const char *special);
 	//! Try to convert text in a buffer to a date; returns true if parsing was successful
 	//! If the date was a "special" value, the special flag will be set.
-	DUCKDB_API static bool TryConvertDate(const char *buf, idx_t len, idx_t &pos, date_t &result, bool &special,
-	                                      bool strict = false);
+	DUCKDB_API static DateCastResult TryConvertDate(const char *buf, idx_t len, idx_t &pos, date_t &result,
+	                                                bool &special, bool strict = false);
 
 	//! Create a string "YYYY-MM-DD" from a specified (year, month, day)
 	//! combination
@@ -4329,8 +4352,11 @@ public:
 	//! Helper function to parse two digits from a string (e.g. "30" -> 30, "03" -> 3, "3" -> 3)
 	DUCKDB_API static bool ParseDoubleDigit(const char *buf, idx_t len, idx_t &pos, int32_t &result);
 
-	DUCKDB_API static string ConversionError(const string &str);
-	DUCKDB_API static string ConversionError(string_t str);
+	DUCKDB_API static string FormatError(const string &str);
+	DUCKDB_API static string FormatError(string_t str);
+
+	DUCKDB_API static string RangeError(const string &str);
+	DUCKDB_API static string RangeError(string_t str);
 
 private:
 	static void ExtractYearOffset(int32_t &n, int32_t &year, int32_t &year_offset);
@@ -6041,7 +6067,7 @@ public:
 	virtual unique_ptr<PhysicalOperator> PlanUpdate(ClientContext &context, LogicalUpdate &op,
 	                                                unique_ptr<PhysicalOperator> plan) = 0;
 	virtual unique_ptr<LogicalOperator> BindCreateIndex(Binder &binder, CreateStatement &stmt, TableCatalogEntry &table,
-	                                                    unique_ptr<LogicalOperator> plan) = 0;
+	                                                    unique_ptr<LogicalOperator> plan);
 	virtual unique_ptr<LogicalOperator> BindAlterAddIndex(Binder &binder, TableCatalogEntry &table_entry,
 	                                                      unique_ptr<LogicalOperator> plan,
 	                                                      unique_ptr<CreateIndexInfo> create_info,
@@ -6058,7 +6084,11 @@ public:
 		return CatalogLookupBehavior::STANDARD;
 	}
 
+	//! Returns the default schema of the catalog
+	virtual string GetDefaultSchema() const;
+
 	//! The default table is used for `SELECT * FROM <catalog_name>;`
+	//! FIXME: these should be virtual methods
 	DUCKDB_API bool HasDefaultTable() const;
 	DUCKDB_API void SetDefaultTable(const string &schema, const string &name);
 	DUCKDB_API string GetDefaultTable() const;
@@ -6285,7 +6315,8 @@ public:
 	Allocator &allocator;
 	//! The buffer that users can write to
 	data_ptr_t buffer;
-	//! The size of the portion that users can write to, this is equivalent to internal_size - BLOCK_HEADER_SIZE
+	//! The user-facing size of the buffer.
+	//! This is equivalent to internal_size - BLOCK_HEADER_SIZE.
 	uint64_t size;
 
 public:
@@ -6300,12 +6331,15 @@ public:
 		return type;
 	}
 
-	// Same rules as the constructor. We will add room for a header, in additio to
-	// the requested user bytes. We will then sector-align the result.
+	// Same rules as the constructor. We add room for a header, in addition to
+	// the requested user bytes. We then sector-align the result.
 	void Resize(uint64_t user_size);
 
 	uint64_t AllocSize() const {
 		return internal_size;
+	}
+	uint64_t Size() const {
+		return size;
 	}
 	data_ptr_t InternalBuffer() {
 		return internal_buffer;
@@ -6317,18 +6351,19 @@ public:
 	};
 
 	MemoryRequirement CalculateMemory(uint64_t user_size);
-
 	void Initialize(DebugInitialize info);
 
 protected:
-	//! The type of the buffer
+	//! The type of the buffer.
 	FileBufferType type;
-	//! The pointer to the internal buffer that will be read or written, including the buffer header
+	//! The pointer to the internal buffer that will be read from or written to.
+	//! This includes the buffer header.
 	data_ptr_t internal_buffer;
-	//! The aligned size as passed to the constructor. This is the size that is read or written to disk.
+	//! The aligned size as passed to the constructor.
+	//! This is the size that is read from or written to disk.
 	uint64_t internal_size;
 
-	void ReallocBuffer(size_t malloc_size);
+	void ReallocBuffer(idx_t new_size);
 	void Init();
 };
 
@@ -6941,7 +6976,7 @@ struct SelectionVector {
 		Initialize(count);
 	}
 	SelectionVector(idx_t start, idx_t count) {
-		Initialize(STANDARD_VECTOR_SIZE);
+		Initialize(MaxValue<idx_t>(count, STANDARD_VECTOR_SIZE));
 		for (idx_t i = 0; i < count; i++) {
 			set_index(i, start + i);
 		}
@@ -7998,10 +8033,13 @@ struct Storage {
 	static void VerifyBlockAllocSize(const idx_t block_alloc_size);
 };
 
-//! The version number of the database storage format
+//! The version number default, lower and upper bounds of the database storage format
 extern const uint64_t VERSION_NUMBER;
+extern const uint64_t VERSION_NUMBER_LOWER;
+extern const uint64_t VERSION_NUMBER_UPPER;
 string GetDuckDBVersion(idx_t version_number);
 optional_idx GetStorageVersion(const char *version_string);
+string GetStorageVersionName(idx_t serialization_version);
 optional_idx GetSerializationVersion(const char *version_string);
 vector<string> GetSerializationCandidates();
 
@@ -8053,9 +8091,11 @@ struct DatabaseHeader {
 	idx_t block_alloc_size;
 	//! The vector size of the database file
 	idx_t vector_size;
+	//! The serialization compatibility version
+	idx_t serialization_compatibility;
 
 	void Write(WriteStream &ser);
-	static DatabaseHeader Read(ReadStream &source);
+	static DatabaseHeader Read(const MainHeader &header, ReadStream &source);
 };
 
 //! Detect mismatching constant values when compiling
@@ -8529,9 +8569,10 @@ public:
 	/*!
 	    Create a new vector
 	    If create_data is true, the vector will be an owning empty vector.
-	    If zero_data is true, the allocated data will be zero-initialized.
+	    If initialize_to_zero is true, the allocated data will be zero-initialized.
 	*/
-	DUCKDB_API Vector(LogicalType type, bool create_data, bool zero_data, idx_t capacity = STANDARD_VECTOR_SIZE);
+	DUCKDB_API Vector(LogicalType type, bool create_data, bool initialize_to_zero,
+	                  idx_t capacity = STANDARD_VECTOR_SIZE);
 	// implicit copying of Vectors is not allowed
 	Vector(const Vector &) = delete;
 	// but moving of vectors is allowed
@@ -8571,7 +8612,7 @@ public:
 
 	//! Creates the data of this vector with the specified type. Any data that
 	//! is currently in the vector is destroyed.
-	DUCKDB_API void Initialize(bool zero_data = false, idx_t capacity = STANDARD_VECTOR_SIZE);
+	DUCKDB_API void Initialize(bool initialize_to_zero = false, idx_t capacity = STANDARD_VECTOR_SIZE);
 
 	//! Converts this Vector to a printable string representation
 	DUCKDB_API string ToString(idx_t count) const;
@@ -10346,7 +10387,7 @@ public:
 namespace duckdb {
 
 //! Whether or not a function can throw an error or not
-enum class FunctionErrors : uint8_t { CANNOT_ERROR = 0, CAN_THROW_ERROR = 1 };
+enum class FunctionErrors : uint8_t { CANNOT_ERROR = 0, CAN_THROW_RUNTIME_ERROR = 1 };
 
 } // namespace duckdb
 
@@ -10479,7 +10520,7 @@ private:
 
 	template <class INPUT_TYPE, class RESULT_TYPE, class OPWRAPPER, class OP>
 	static inline void ExecuteStandard(Vector &input, Vector &result, idx_t count, void *dataptr, bool adds_nulls,
-	                                   FunctionErrors errors = FunctionErrors::CAN_THROW_ERROR) {
+	                                   FunctionErrors errors = FunctionErrors::CAN_THROW_RUNTIME_ERROR) {
 		switch (input.GetVectorType()) {
 		case VectorType::CONSTANT_VECTOR: {
 			result.SetVectorType(VectorType::CONSTANT_VECTOR);
@@ -10557,7 +10598,7 @@ public:
 
 	template <class INPUT_TYPE, class RESULT_TYPE, class FUNC = std::function<RESULT_TYPE(INPUT_TYPE)>>
 	static void Execute(Vector &input, Vector &result, idx_t count, FUNC fun,
-	                    FunctionErrors errors = FunctionErrors::CAN_THROW_ERROR) {
+	                    FunctionErrors errors = FunctionErrors::CAN_THROW_RUNTIME_ERROR) {
 		ExecuteStandard<INPUT_TYPE, RESULT_TYPE, UnaryLambdaWrapper, FUNC>(
 		    input, result, count, reinterpret_cast<void *>(&fun), false, errors);
 	}
@@ -11529,7 +11570,7 @@ namespace duckdb {
 enum class CompressionType : uint8_t {
 	COMPRESSION_AUTO = 0,
 	COMPRESSION_UNCOMPRESSED = 1,
-	COMPRESSION_CONSTANT = 2,
+	COMPRESSION_CONSTANT = 2, // internal only
 	COMPRESSION_RLE = 3,
 	COMPRESSION_DICTIONARY = 4,
 	COMPRESSION_PFOR_DELTA = 5,
@@ -11541,7 +11582,8 @@ enum class CompressionType : uint8_t {
 	COMPRESSION_ALPRD = 11,
 	COMPRESSION_ZSTD = 12,
 	COMPRESSION_ROARING = 13,
-	COMPRESSION_COUNT // This has to stay the last entry of the type!
+	COMPRESSION_EMPTY = 14, // internal only
+	COMPRESSION_COUNT       // This has to stay the last entry of the type!
 };
 
 bool CompressionTypeIsDeprecated(CompressionType compression_type);
@@ -11667,6 +11709,7 @@ private:
 } // namespace duckdb
 
 
+
 namespace duckdb {
 class CatalogEntry;
 class Catalog;
@@ -11696,6 +11739,7 @@ enum class FunctionNullHandling : uint8_t { DEFAULT_NULL_HANDLING = 0, SPECIAL_H
 //!                            but the result might change across queries (e.g. NOW(), CURRENT_TIME)
 //! VOLATILE                -> the result of this function might change per row (e.g. RANDOM())
 enum class FunctionStability : uint8_t { CONSISTENT = 0, VOLATILE = 1, CONSISTENT_WITHIN_QUERY = 2 };
+
 //! How to handle collations
 //! PROPAGATE_COLLATIONS        -> this function combines collation from its inputs and emits them again (default)
 //! PUSH_COMBINABLE_COLLATIONS  -> combinable collations are executed for the input arguments
@@ -11812,7 +11856,8 @@ public:
 	DUCKDB_API BaseScalarFunction(string name, vector<LogicalType> arguments, LogicalType return_type,
 	                              FunctionStability stability,
 	                              LogicalType varargs = LogicalType(LogicalTypeId::INVALID),
-	                              FunctionNullHandling null_handling = FunctionNullHandling::DEFAULT_NULL_HANDLING);
+	                              FunctionNullHandling null_handling = FunctionNullHandling::DEFAULT_NULL_HANDLING,
+	                              FunctionErrors errors = FunctionErrors::CANNOT_ERROR);
 	DUCKDB_API ~BaseScalarFunction() override;
 
 	//! Return type of the function
@@ -11821,8 +11866,15 @@ public:
 	FunctionStability stability;
 	//! How this function handles NULL values
 	FunctionNullHandling null_handling;
+	//! Whether or not this function can throw an error
+	FunctionErrors errors;
 	//! Collation handling of the function
 	FunctionCollationHandling collation_handling;
+
+	static BaseScalarFunction SetReturnsError(BaseScalarFunction &function) {
+		function.errors = FunctionErrors::CAN_THROW_RUNTIME_ERROR;
+		return function;
+	}
 
 public:
 	DUCKDB_API hash_t Hash() const;
@@ -11981,6 +12033,14 @@ PhysicalType GetTypeId() {
 	} else if (std::is_same<T, dtime_t>()) {
 		return PhysicalType::INT64;
 	} else if (std::is_same<T, timestamp_t>()) {
+		return PhysicalType::INT64;
+	} else if (std::is_same<T, timestamp_sec_t>()) {
+		return PhysicalType::INT64;
+	} else if (std::is_same<T, timestamp_ms_t>()) {
+		return PhysicalType::INT64;
+	} else if (std::is_same<T, timestamp_ns_t>()) {
+		return PhysicalType::INT64;
+	} else if (std::is_same<T, timestamp_tz_t>()) {
 		return PhysicalType::INT64;
 	} else if (std::is_same<T, float>()) {
 		return PhysicalType::FLOAT;
@@ -13105,13 +13165,13 @@ struct FunctionModifiedDatabasesInput {
 
 struct FunctionBindExpressionInput {
 	FunctionBindExpressionInput(ClientContext &context_p, optional_ptr<FunctionData> bind_data_p,
-	                            BoundFunctionExpression &function_p)
-	    : context(context_p), bind_data(bind_data_p), function(function_p) {
+	                            vector<unique_ptr<Expression>> &children_p)
+	    : context(context_p), bind_data(bind_data_p), children(children_p) {
 	}
 
 	ClientContext &context;
 	optional_ptr<FunctionData> bind_data;
-	BoundFunctionExpression &function;
+	vector<unique_ptr<Expression>> &children;
 };
 
 struct ScalarFunctionBindInput {
@@ -14400,6 +14460,7 @@ public:
 
 	//! Remove unneeded/duplicate order elements.
 	//! Returns true of orders is not empty.
+	static bool Simplify(vector<BoundOrderByNode> &orders, const vector<unique_ptr<Expression>> &groups);
 	bool Simplify(const vector<unique_ptr<Expression>> &groups);
 };
 
@@ -15673,6 +15734,8 @@ struct StatementProperties {
 
 
 
+#include <utility>
+
 
 
 
@@ -15683,16 +15746,19 @@ enum class ArrowOffsetSize : uint8_t { REGULAR, LARGE };
 //! A set of properties from the client context that can be used to interpret the query result
 struct ClientProperties {
 	ClientProperties(string time_zone_p, ArrowOffsetSize arrow_offset_size_p, bool arrow_use_list_view_p,
-	                 bool produce_arrow_string_view_p, bool lossless_conversion)
+	                 bool produce_arrow_string_view_p, bool lossless_conversion,
+	                 optional_ptr<ClientContext> client_context)
 	    : time_zone(std::move(time_zone_p)), arrow_offset_size(arrow_offset_size_p),
-	      arrow_use_list_view(arrow_use_list_view_p), arrow_lossless_conversion(lossless_conversion) {
+	      arrow_use_list_view(arrow_use_list_view_p), produce_arrow_string_view(produce_arrow_string_view_p),
+	      arrow_lossless_conversion(lossless_conversion), client_context(client_context) {
 	}
-	ClientProperties() {};
+
 	string time_zone = "UTC";
 	ArrowOffsetSize arrow_offset_size = ArrowOffsetSize::REGULAR;
 	bool arrow_use_list_view = false;
 	bool produce_arrow_string_view = false;
 	bool arrow_lossless_conversion = false;
+	optional_ptr<ClientContext> client_context;
 };
 } // namespace duckdb
 
@@ -16721,7 +16787,7 @@ public:
 	string DebugToString();
 	virtual unique_ptr<TableFilter> Copy() const = 0;
 	virtual bool Equals(const TableFilter &other) const {
-		return filter_type != other.filter_type;
+		return filter_type == other.filter_type;
 	}
 	virtual unique_ptr<Expression> ToExpression(const Expression &column) const = 0;
 
@@ -19331,6 +19397,7 @@ public:
 public:
 	explicit LogicalDependency(CatalogEntry &entry);
 	LogicalDependency();
+	LogicalDependency(optional_ptr<Catalog> catalog, CatalogEntryInfo entry, string catalog_str);
 	bool operator==(const LogicalDependency &other) const;
 
 public:
@@ -19520,8 +19587,6 @@ struct EnumUtil {
     static string ToString(T value) { return string(ToChars<T>(value)); }
 };
 
-enum class ARTAppendMode : uint8_t;
-
 enum class ARTConflictType : uint8_t;
 
 enum class AccessMode : uint8_t;
@@ -19590,6 +19655,8 @@ enum class CompressedMaterializationDirection : uint8_t;
 
 enum class CompressionType : uint8_t;
 
+enum class CompressionValidity : uint8_t;
+
 enum class ConflictManagerMode : uint8_t;
 
 enum class ConstraintType : uint8_t;
@@ -19601,6 +19668,8 @@ enum class CopyOverwriteMode : uint8_t;
 enum class CopyToType : uint8_t;
 
 enum class DataFileType : uint8_t;
+
+enum class DateCastResult : uint8_t;
 
 enum class DatePartSpecifier : uint8_t;
 
@@ -19672,6 +19741,8 @@ enum class GateStatus : uint8_t;
 
 enum class HLLStorageType : uint8_t;
 
+enum class IndexAppendMode : uint8_t;
+
 enum class IndexConstraintType : uint8_t;
 
 enum class InsertColumnOrder : uint8_t;
@@ -19688,6 +19759,12 @@ enum class LimitNodeType : uint8_t;
 
 enum class LoadType : uint8_t;
 
+enum class LogContextScope : uint8_t;
+
+enum class LogLevel : uint8_t;
+
+enum class LogMode : uint8_t;
+
 enum class LogicalOperatorType : uint8_t;
 
 enum class LogicalTypeId : uint8_t;
@@ -19703,6 +19780,8 @@ enum class MemoryTag : uint8_t;
 enum class MetaPipelineType : uint8_t;
 
 enum class MetricsType : uint8_t;
+
+enum class MultiFileReaderColumnMappingMode : uint8_t;
 
 enum class NType : uint8_t;
 
@@ -19868,9 +19947,6 @@ enum class WindowExcludeMode : uint8_t;
 
 
 template<>
-const char* EnumUtil::ToChars<ARTAppendMode>(ARTAppendMode value);
-
-template<>
 const char* EnumUtil::ToChars<ARTConflictType>(ARTConflictType value);
 
 template<>
@@ -19973,6 +20049,9 @@ template<>
 const char* EnumUtil::ToChars<CompressionType>(CompressionType value);
 
 template<>
+const char* EnumUtil::ToChars<CompressionValidity>(CompressionValidity value);
+
+template<>
 const char* EnumUtil::ToChars<ConflictManagerMode>(ConflictManagerMode value);
 
 template<>
@@ -19989,6 +20068,9 @@ const char* EnumUtil::ToChars<CopyToType>(CopyToType value);
 
 template<>
 const char* EnumUtil::ToChars<DataFileType>(DataFileType value);
+
+template<>
+const char* EnumUtil::ToChars<DateCastResult>(DateCastResult value);
 
 template<>
 const char* EnumUtil::ToChars<DatePartSpecifier>(DatePartSpecifier value);
@@ -20096,6 +20178,9 @@ template<>
 const char* EnumUtil::ToChars<HLLStorageType>(HLLStorageType value);
 
 template<>
+const char* EnumUtil::ToChars<IndexAppendMode>(IndexAppendMode value);
+
+template<>
 const char* EnumUtil::ToChars<IndexConstraintType>(IndexConstraintType value);
 
 template<>
@@ -20120,6 +20205,15 @@ template<>
 const char* EnumUtil::ToChars<LoadType>(LoadType value);
 
 template<>
+const char* EnumUtil::ToChars<LogContextScope>(LogContextScope value);
+
+template<>
+const char* EnumUtil::ToChars<LogLevel>(LogLevel value);
+
+template<>
+const char* EnumUtil::ToChars<LogMode>(LogMode value);
+
+template<>
 const char* EnumUtil::ToChars<LogicalOperatorType>(LogicalOperatorType value);
 
 template<>
@@ -20142,6 +20236,9 @@ const char* EnumUtil::ToChars<MetaPipelineType>(MetaPipelineType value);
 
 template<>
 const char* EnumUtil::ToChars<MetricsType>(MetricsType value);
+
+template<>
+const char* EnumUtil::ToChars<MultiFileReaderColumnMappingMode>(MultiFileReaderColumnMappingMode value);
 
 template<>
 const char* EnumUtil::ToChars<NType>(NType value);
@@ -20388,9 +20485,6 @@ const char* EnumUtil::ToChars<WindowExcludeMode>(WindowExcludeMode value);
 
 
 template<>
-ARTAppendMode EnumUtil::FromString<ARTAppendMode>(const char *value);
-
-template<>
 ARTConflictType EnumUtil::FromString<ARTConflictType>(const char *value);
 
 template<>
@@ -20493,6 +20587,9 @@ template<>
 CompressionType EnumUtil::FromString<CompressionType>(const char *value);
 
 template<>
+CompressionValidity EnumUtil::FromString<CompressionValidity>(const char *value);
+
+template<>
 ConflictManagerMode EnumUtil::FromString<ConflictManagerMode>(const char *value);
 
 template<>
@@ -20509,6 +20606,9 @@ CopyToType EnumUtil::FromString<CopyToType>(const char *value);
 
 template<>
 DataFileType EnumUtil::FromString<DataFileType>(const char *value);
+
+template<>
+DateCastResult EnumUtil::FromString<DateCastResult>(const char *value);
 
 template<>
 DatePartSpecifier EnumUtil::FromString<DatePartSpecifier>(const char *value);
@@ -20616,6 +20716,9 @@ template<>
 HLLStorageType EnumUtil::FromString<HLLStorageType>(const char *value);
 
 template<>
+IndexAppendMode EnumUtil::FromString<IndexAppendMode>(const char *value);
+
+template<>
 IndexConstraintType EnumUtil::FromString<IndexConstraintType>(const char *value);
 
 template<>
@@ -20640,6 +20743,15 @@ template<>
 LoadType EnumUtil::FromString<LoadType>(const char *value);
 
 template<>
+LogContextScope EnumUtil::FromString<LogContextScope>(const char *value);
+
+template<>
+LogLevel EnumUtil::FromString<LogLevel>(const char *value);
+
+template<>
+LogMode EnumUtil::FromString<LogMode>(const char *value);
+
+template<>
 LogicalOperatorType EnumUtil::FromString<LogicalOperatorType>(const char *value);
 
 template<>
@@ -20662,6 +20774,9 @@ MetaPipelineType EnumUtil::FromString<MetaPipelineType>(const char *value);
 
 template<>
 MetricsType EnumUtil::FromString<MetricsType>(const char *value);
+
+template<>
+MultiFileReaderColumnMappingMode EnumUtil::FromString<MultiFileReaderColumnMappingMode>(const char *value);
 
 template<>
 NType EnumUtil::FromString<NType>(const char *value);
@@ -21183,6 +21298,15 @@ struct ForeignKeyInfo {
 	vector<PhysicalIndex> pk_keys;
 	//! The set of foreign key table's column's index
 	vector<PhysicalIndex> fk_keys;
+
+	bool IsDeleteConstraint() const {
+		return type == ForeignKeyType::FK_TYPE_PRIMARY_KEY_TABLE ||
+		       type == ForeignKeyType::FK_TYPE_SELF_REFERENCE_TABLE;
+	}
+	bool IsAppendConstraint() const {
+		return type == ForeignKeyType::FK_TYPE_FOREIGN_KEY_TABLE ||
+		       type == ForeignKeyType::FK_TYPE_SELF_REFERENCE_TABLE;
+	}
 };
 
 //! Constraint is the base class of any type of table constraint.
@@ -22067,7 +22191,9 @@ public:
 		return set_paths;
 	}
 	DUCKDB_API const CatalogSearchEntry &GetDefault();
+	//! FIXME: this method is deprecated
 	DUCKDB_API string GetDefaultSchema(const string &catalog);
+	DUCKDB_API string GetDefaultSchema(ClientContext &context, const string &catalog);
 	DUCKDB_API string GetDefaultCatalog(const string &schema);
 
 	DUCKDB_API vector<string> GetSchemasForCatalog(const string &catalog);
@@ -22507,7 +22633,8 @@ enum class BindingType { BASE, TABLE, DUMMY, CATALOG_ENTRY };
 
 //! A Binding represents a binding to a table, table-producing function or subquery with a specified table index.
 struct Binding {
-	Binding(BindingType binding_type, BindingAlias alias, vector<LogicalType> types, vector<string> names, idx_t index);
+	Binding(BindingType binding_type, BindingAlias alias, vector<LogicalType> types, vector<string> names, idx_t index,
+	        LogicalType rowid_type = LogicalType(LogicalType::ROW_TYPE));
 	virtual ~Binding() = default;
 
 	//! The type of Binding
@@ -22522,6 +22649,8 @@ struct Binding {
 	vector<string> names;
 	//! Name -> index for the names
 	case_insensitive_map_t<column_t> name_map;
+
+	LogicalType rowid_type;
 
 public:
 	bool TryGetBindingIndex(const string &column_name, column_t &column_index);
@@ -22927,6 +23056,7 @@ struct TableFunctionInitInput {
 			column_indexes.emplace_back(col_id);
 		}
 	}
+
 	TableFunctionInitInput(optional_ptr<const FunctionData> bind_data_p, vector<ColumnIndex> column_indexes_p,
 	                       const vector<idx_t> &projection_ids_p, optional_ptr<TableFilterSet> filters_p,
 	                       optional_ptr<SampleOptions> sample_options_p = nullptr)
@@ -22946,15 +23076,15 @@ struct TableFunctionInitInput {
 
 	bool CanRemoveFilterColumns() const {
 		if (projection_ids.empty()) {
-			// Not set, can't remove filter columns
+			// No filter columns to remove.
 			return false;
-		} else if (projection_ids.size() == column_ids.size()) {
-			// Filter column is used in remainder of plan, can't remove
-			return false;
-		} else {
-			// Less columns need to be projected out than that we scan
-			return true;
 		}
+		if (projection_ids.size() == column_ids.size()) {
+			// Filter column is used in remainder of plan, so we cannot remove it.
+			return false;
+		}
+		// Fewer columns need to be projected out than that we scan.
+		return true;
 	}
 };
 
@@ -23338,6 +23468,7 @@ private:
 
 
 
+
 namespace duckdb {
 class Executor;
 class Task;
@@ -23377,6 +23508,8 @@ public:
 
 	virtual void PrintPipeline() {
 	}
+
+	ClientContext &GetClientContext();
 
 	template <class TARGET>
 	TARGET &Cast() {
@@ -23855,7 +23988,7 @@ struct BoundParameterData {
 public:
 	BoundParameterData() {
 	}
-	explicit BoundParameterData(Value val) : value(std::move(val)), return_type(value.type()) {
+	explicit BoundParameterData(Value val) : value(std::move(val)), return_type(GetDefaultType(value.type())) {
 	}
 	BoundParameterData(Value val, LogicalType type_p) : value(std::move(val)), return_type(std::move(type_p)) {
 	}
@@ -23877,6 +24010,14 @@ public:
 
 	void Serialize(Serializer &serializer) const;
 	static shared_ptr<BoundParameterData> Deserialize(Deserializer &deserializer);
+
+private:
+	LogicalType GetDefaultType(const LogicalType &type) {
+		if (value.type().id() == LogicalTypeId::VARCHAR && StringType::GetCollation(type).empty()) {
+			return LogicalTypeId::STRING_LITERAL;
+		}
+		return value.type();
+	}
 };
 
 } // namespace duckdb
@@ -24735,7 +24876,12 @@ typedef struct {
 	void *internal_data;
 } duckdb_result;
 
-//! A database object. Should be closed with `duckdb_close`.
+//! A database instance cache object. Must be destroyed with `duckdb_destroy_instance_cache`.
+typedef struct _duckdb_instance_cache {
+	void *internal_ptr;
+} * duckdb_instance_cache;
+
+//! A database object. Must be closed with `duckdb_close`.
 typedef struct _duckdb_database {
 	void *internal_ptr;
 } * duckdb_database;
@@ -24964,6 +25110,8 @@ struct duckdb_extension_access {
 	const void *(*get_api)(duckdb_extension_info info, const char *version);
 };
 
+#ifndef DUCKDB_API_EXCLUDE_FUNCTIONS
+
 //===--------------------------------------------------------------------===//
 // Functions
 //===--------------------------------------------------------------------===//
@@ -24973,11 +25121,43 @@ struct duckdb_extension_access {
 //===--------------------------------------------------------------------===//
 
 /*!
+Creates a new database instance cache.
+The instance cache is necessary if a client/program (re)opens multiple databases to the same file within the same
+process. Must be destroyed with 'duckdb_destroy_instance_cache'.
+
+* @return The database instance cache.
+*/
+DUCKDB_API duckdb_instance_cache duckdb_create_instance_cache();
+
+/*!
+Creates a new database instance in the instance cache, or retrieves an existing database instance.
+Must be closed with 'duckdb_close'.
+
+* @param instance_cache The instance cache in which to create the database, or from which to take the database.
+* @param path Path to the database file on disk. Both `nullptr` and `:memory:` open or retrieve an in-memory database.
+* @param out_database The resulting cached database.
+* @param config (Optional) configuration used to create the database.
+* @param out_error If set and the function returns `DuckDBError`, this contains the error message.
+Note that the error message must be freed using `duckdb_free`.
+* @return `DuckDBSuccess` on success or `DuckDBError` on failure.
+*/
+DUCKDB_API duckdb_state duckdb_get_or_create_from_cache(duckdb_instance_cache instance_cache, const char *path,
+                                                        duckdb_database *out_database, duckdb_config config,
+                                                        char **out_error);
+
+/*!
+Destroys an existing database instance cache and de-allocates its memory.
+
+* @param instance_cache The instance cache to destroy.
+*/
+DUCKDB_API void duckdb_destroy_instance_cache(duckdb_instance_cache *instance_cache);
+
+/*!
 Creates a new database or opens an existing database file stored at the given path.
 If no path is given a new in-memory database is created instead.
-The instantiated database should be closed with 'duckdb_close'.
+The database must be closed with 'duckdb_close'.
 
-* @param path Path to the database file on disk, or `nullptr` or `:memory:` to open an in-memory database.
+* @param path Path to the database file on disk. Both `nullptr` and `:memory:` open an in-memory database.
 * @param out_database The result database object.
 * @return `DuckDBSuccess` on success or `DuckDBError` on failure.
 */
@@ -24985,13 +25165,13 @@ DUCKDB_API duckdb_state duckdb_open(const char *path, duckdb_database *out_datab
 
 /*!
 Extended version of duckdb_open. Creates a new database or opens an existing database file stored at the given path.
-The instantiated database should be closed with 'duckdb_close'.
+The database must be closed with 'duckdb_close'.
 
-* @param path Path to the database file on disk, or `nullptr` or `:memory:` to open an in-memory database.
+* @param path Path to the database file on disk. Both `nullptr` and `:memory:` open an in-memory database.
 * @param out_database The result database object.
-* @param config (Optional) configuration used to start up the database system.
-* @param out_error If set and the function returns DuckDBError, this will contain the reason why the start-up failed.
-Note that the error must be freed using `duckdb_free`.
+* @param config (Optional) configuration used to start up the database.
+* @param out_error If set and the function returns `DuckDBError`, this contains the error message.
+Note that the error message must be freed using `duckdb_free`.
 * @return `DuckDBSuccess` on success or `DuckDBError` on failure.
 */
 DUCKDB_API duckdb_state duckdb_open_ext(const char *path, duckdb_database *out_database, duckdb_config config,
@@ -28793,6 +28973,8 @@ Destroys the cast function object.
 */
 DUCKDB_API void duckdb_destroy_cast_function(duckdb_cast_function *cast_function);
 
+#endif
+
 #ifdef __cplusplus
 }
 #endif
@@ -29036,7 +29218,8 @@ enum class OptimizerType : uint32_t {
 	JOIN_FILTER_PUSHDOWN,
 	EXTENSION,
 	MATERIALIZED_CTE,
-	SUM_REWRITER
+	SUM_REWRITER,
+	LATE_MATERIALIZATION
 };
 
 string OptimizerTypeToString(OptimizerType type);
@@ -29097,6 +29280,7 @@ enum class MetricsType : uint8_t {
     OPTIMIZER_EXTENSION,
     OPTIMIZER_MATERIALIZED_CTE,
     OPTIMIZER_SUM_REWRITER,
+    OPTIMIZER_LATE_MATERIALIZATION,
 };
 
 struct MetricsTypeHashFunction {
@@ -29166,8 +29350,8 @@ public:
 
 public:
 	template <class METRIC_TYPE>
-	METRIC_TYPE GetMetricValue(const MetricsType setting) const {
-		auto val = metrics.at(setting);
+	METRIC_TYPE GetMetricValue(const MetricsType type) const {
+		auto val = metrics.at(type);
 		return val.GetValue<METRIC_TYPE>();
 	}
 
@@ -29295,7 +29479,10 @@ struct ClientConfig {
 	//! The maximum amount of OR filters we generate dynamically from a hash join
 	idx_t dynamic_or_filter_threshold = 50;
 
-	//! Whether or not the "/" division operator defaults to integer division or floating point division
+	//! The maximum amount of rows in the LIMIT/SAMPLE for which we trigger late materialization
+	idx_t late_materialization_max_rows = 50;
+
+	//! Whether the "/" division operator defaults to integer division or floating point division
 	bool integer_division = false;
 	//! When a scalar subquery returns multiple rows - return a random row instead of returning an error
 	bool scalar_subquery_error_on_multiple_rows = true;
@@ -29434,6 +29621,505 @@ public:
 //
 //===----------------------------------------------------------------------===//
 
+
+
+//===----------------------------------------------------------------------===//
+//                         DuckDB
+//
+// duckdb/common/arrow/arrow_type_extension.hpp
+//
+//
+//===----------------------------------------------------------------------===//
+
+
+
+
+
+
+
+
+
+
+
+namespace duckdb {
+
+class DataChunk;
+
+//! Abstract chunk fetcher
+class ChunkScanState {
+public:
+	explicit ChunkScanState();
+	virtual ~ChunkScanState();
+
+public:
+	ChunkScanState(const ChunkScanState &other) = delete;
+	ChunkScanState(ChunkScanState &&other) = default;
+	ChunkScanState &operator=(const ChunkScanState &other) = delete;
+	ChunkScanState &operator=(ChunkScanState &&other) = default;
+
+public:
+	virtual bool LoadNextChunk(ErrorData &error) = 0;
+	virtual bool HasError() const = 0;
+	virtual ErrorData &GetError() = 0;
+	virtual const vector<LogicalType> &Types() const = 0;
+	virtual const vector<string> &Names() const = 0;
+	idx_t CurrentOffset() const;
+	idx_t RemainingInChunk() const;
+	DataChunk &CurrentChunk();
+	bool ChunkIsEmpty() const;
+	bool Finished() const;
+	bool ScanStarted() const;
+	void IncreaseOffset(idx_t increment, bool unsafe = false);
+
+protected:
+	idx_t offset = 0;
+	bool finished = false;
+	unique_ptr<DataChunk> current_chunk;
+};
+
+} // namespace duckdb
+
+//===----------------------------------------------------------------------===//
+//                         DuckDB
+//
+// duckdb/function/table/arrow/arrow_duck_schema.hpp
+//
+//
+//===----------------------------------------------------------------------===//
+
+
+
+
+
+
+
+
+//===----------------------------------------------------------------------===//
+//                         DuckDB
+//
+// duckdb/function/table/arrow/arrow_type_info.hpp
+//
+//
+//===----------------------------------------------------------------------===//
+
+
+
+
+
+
+
+
+
+#include <cstdint>
+
+namespace duckdb {
+
+enum class ArrowTypeInfoType : uint8_t { LIST, STRUCT, DATE_TIME, STRING, ARRAY };
+
+} // namespace duckdb
+
+
+
+namespace duckdb {
+
+//===--------------------------------------------------------------------===//
+// Arrow Time/Date Types
+//===--------------------------------------------------------------------===//
+enum class ArrowDateTimeType : uint8_t {
+	MILLISECONDS,
+	MICROSECONDS,
+	NANOSECONDS,
+	SECONDS,
+	DAYS,
+	MONTHS,
+	MONTH_DAY_NANO
+};
+
+} // namespace duckdb
+
+
+
+namespace duckdb {
+
+//===--------------------------------------------------------------------===//
+// Arrow Variable Size Types
+//===--------------------------------------------------------------------===//
+enum class ArrowVariableSizeType : uint8_t { NORMAL, FIXED_SIZE, SUPER_SIZE, VIEW };
+
+} // namespace duckdb
+
+
+
+namespace duckdb {
+
+class ArrowType;
+
+struct ArrowTypeInfo {
+public:
+	explicit ArrowTypeInfo() : type() {
+	}
+
+	explicit ArrowTypeInfo(ArrowTypeInfoType type);
+	virtual ~ArrowTypeInfo();
+
+	ArrowTypeInfoType type;
+
+public:
+	template <class TARGET>
+	TARGET &Cast() {
+		D_ASSERT(dynamic_cast<TARGET *>(this));
+		if (type != TARGET::TYPE) {
+			throw InternalException("Failed to cast ArrowTypeInfo, type mismatch (expected: %s, got: %s)",
+			                        EnumUtil::ToString(TARGET::TYPE), EnumUtil::ToString(type));
+		}
+		return reinterpret_cast<TARGET &>(*this);
+	}
+	template <class TARGET>
+	const TARGET &Cast() const {
+		D_ASSERT(dynamic_cast<const TARGET *>(this));
+		if (type != TARGET::TYPE) {
+			throw InternalException("Failed to cast ArrowTypeInfo, type mismatch (expected: %s, got: %s)",
+			                        EnumUtil::ToString(TARGET::TYPE), EnumUtil::ToString(type));
+		}
+		return reinterpret_cast<const TARGET &>(*this);
+	}
+};
+
+struct ArrowStructInfo : public ArrowTypeInfo {
+public:
+	static constexpr const ArrowTypeInfoType TYPE = ArrowTypeInfoType::STRUCT;
+
+public:
+	explicit ArrowStructInfo(vector<shared_ptr<ArrowType>> children);
+	~ArrowStructInfo() override;
+
+public:
+	idx_t ChildCount() const;
+	const ArrowType &GetChild(idx_t index) const;
+	const vector<shared_ptr<ArrowType>> &GetChildren() const;
+
+private:
+	vector<shared_ptr<ArrowType>> children;
+};
+
+struct ArrowDateTimeInfo : public ArrowTypeInfo {
+public:
+	static constexpr const ArrowTypeInfoType TYPE = ArrowTypeInfoType::DATE_TIME;
+
+public:
+	explicit ArrowDateTimeInfo(ArrowDateTimeType size);
+	~ArrowDateTimeInfo() override;
+
+public:
+	ArrowDateTimeType GetDateTimeType() const;
+
+private:
+	ArrowDateTimeType size_type;
+};
+
+struct ArrowStringInfo : public ArrowTypeInfo {
+public:
+	static constexpr const ArrowTypeInfoType TYPE = ArrowTypeInfoType::STRING;
+
+public:
+	explicit ArrowStringInfo(ArrowVariableSizeType size);
+	explicit ArrowStringInfo(idx_t fixed_size);
+	~ArrowStringInfo() override;
+
+public:
+	ArrowVariableSizeType GetSizeType() const;
+	idx_t FixedSize() const;
+
+private:
+	ArrowVariableSizeType size_type;
+	idx_t fixed_size;
+};
+
+struct ArrowListInfo : public ArrowTypeInfo {
+public:
+	static constexpr const ArrowTypeInfoType TYPE = ArrowTypeInfoType::LIST;
+
+public:
+	static unique_ptr<ArrowListInfo> ListView(shared_ptr<ArrowType> child, ArrowVariableSizeType size);
+	static unique_ptr<ArrowListInfo> List(shared_ptr<ArrowType> child, ArrowVariableSizeType size);
+	~ArrowListInfo() override;
+
+public:
+	ArrowVariableSizeType GetSizeType() const;
+	bool IsView() const;
+	ArrowType &GetChild() const;
+
+private:
+	explicit ArrowListInfo(shared_ptr<ArrowType> child, ArrowVariableSizeType size);
+
+private:
+	ArrowVariableSizeType size_type;
+	bool is_view = false;
+	shared_ptr<ArrowType> child;
+};
+
+struct ArrowArrayInfo : public ArrowTypeInfo {
+public:
+	static constexpr const ArrowTypeInfoType TYPE = ArrowTypeInfoType::ARRAY;
+
+public:
+	explicit ArrowArrayInfo(shared_ptr<ArrowType> child, idx_t fixed_size);
+	~ArrowArrayInfo() override;
+
+public:
+	idx_t FixedSize() const;
+	ArrowType &GetChild() const;
+
+private:
+	shared_ptr<ArrowType> child;
+	idx_t fixed_size;
+};
+
+} // namespace duckdb
+
+
+
+namespace duckdb {
+struct DBConfig;
+
+struct ArrowArrayScanState;
+
+typedef void (*cast_arrow_duck_t)(ClientContext &context, Vector &source, Vector &result, idx_t count);
+
+typedef void (*cast_duck_arrow_t)(ClientContext &context, Vector &source, Vector &result, idx_t count);
+
+class ArrowTypeExtensionData {
+public:
+	explicit ArrowTypeExtensionData(const LogicalType &duckdb_type, const LogicalType &internal_type_p,
+	                                cast_arrow_duck_t arrow_to_duckdb = nullptr,
+	                                cast_duck_arrow_t duckdb_to_arrow = nullptr)
+	    : arrow_to_duckdb(arrow_to_duckdb), duckdb_to_arrow(duckdb_to_arrow), duckdb_type(duckdb_type),
+	      internal_type(internal_type_p) {
+	}
+
+	explicit ArrowTypeExtensionData(const LogicalType &duckdb_type)
+	    : duckdb_type(duckdb_type), internal_type(duckdb_type) {
+	}
+
+	//! (Optional) Callback to function that converts an Arrow Array to a DuckDB Vector
+	cast_arrow_duck_t arrow_to_duckdb = nullptr;
+	//! (Optional) Callback to function that converts a DuckDB Vector to an Arrow Array
+	cast_duck_arrow_t duckdb_to_arrow = nullptr;
+
+	LogicalType GetInternalType() const;
+
+	//! This function returns possible extension types to given DuckDB types
+	static unordered_map<idx_t, const shared_ptr<ArrowTypeExtensionData>>
+	GetExtensionTypes(ClientContext &context, const vector<LogicalType> &duckdb_types);
+	LogicalType GetDuckDBType() const;
+
+private:
+	//! Original DuckDB Type (e.g., UHUGEINT)
+	LogicalType duckdb_type;
+	//! Internal type is a type that refers to the produced duckdb vector when consuming the arrow format
+	LogicalType internal_type;
+};
+
+class ArrowType {
+public:
+	//! From a DuckDB type
+	explicit ArrowType(LogicalType type_p, unique_ptr<ArrowTypeInfo> type_info = nullptr)
+	    : type(std::move(type_p)), type_info(std::move(type_info)) {
+	}
+	explicit ArrowType(string error_message_p, bool not_implemented_p = false)
+	    : type(LogicalTypeId::INVALID), type_info(nullptr), error_message(std::move(error_message_p)),
+	      not_implemented(not_implemented_p) {
+	}
+
+public:
+	LogicalType GetDuckType(bool use_dictionary = false) const;
+
+	void SetDictionary(unique_ptr<ArrowType> dictionary);
+	bool HasDictionary() const;
+	const ArrowType &GetDictionary() const;
+
+	bool RunEndEncoded() const;
+	void SetRunEndEncoded();
+
+	template <class T>
+	const T &GetTypeInfo() const {
+		return type_info->Cast<T>();
+	}
+	void ThrowIfInvalid() const;
+
+	static unique_ptr<ArrowType> GetTypeFromFormat(string &format);
+	static unique_ptr<ArrowType> GetTypeFromFormat(DBConfig &config, ArrowSchema &schema, string &format);
+
+	static unique_ptr<ArrowType> GetTypeFromSchema(DBConfig &config, ArrowSchema &schema);
+
+	static unique_ptr<ArrowType> CreateListType(DBConfig &config, ArrowSchema &child, ArrowVariableSizeType size_type,
+	                                            bool view);
+
+	static unique_ptr<ArrowType> GetArrowLogicalType(DBConfig &config, ArrowSchema &schema);
+
+	bool HasExtension() const;
+
+	//! The Arrow Type Extension data, if any
+	shared_ptr<ArrowTypeExtensionData> extension_data;
+
+protected:
+	LogicalType type;
+	//! Hold the optional type if the array is a dictionary
+	unique_ptr<ArrowType> dictionary_type;
+	//! Is run-end-encoded
+	bool run_end_encoded = false;
+	unique_ptr<ArrowTypeInfo> type_info;
+	//! Error message in case of an invalid type (i.e., from an unsupported extension)
+	string error_message;
+	//! In case of an error do we throw not implemented?
+	bool not_implemented = false;
+};
+
+using arrow_column_map_t = unordered_map<idx_t, shared_ptr<ArrowType>>;
+
+struct ArrowTableType {
+public:
+	void AddColumn(idx_t index, shared_ptr<ArrowType> type);
+	const arrow_column_map_t &GetColumns() const;
+
+private:
+	arrow_column_map_t arrow_convert_data;
+};
+
+} // namespace duckdb
+
+#include <mutex>
+
+namespace duckdb {
+class ArrowSchemaMetadata;
+struct DuckDBArrowSchemaHolder;
+
+struct DBConfig;
+struct ArrowExtensionMetadata {
+public:
+	ArrowExtensionMetadata() {
+	}
+
+	ArrowExtensionMetadata(string extension_name, string vendor_name, string type_name, string arrow_format);
+
+	hash_t GetHash() const;
+
+	string ToString() const;
+
+	string GetExtensionName() const;
+
+	string GetVendorName() const;
+
+	string GetTypeName() const;
+
+	string GetArrowFormat() const;
+
+	void SetArrowFormat(string arrow_format);
+
+	bool IsCanonical() const;
+
+	bool operator==(const ArrowExtensionMetadata &other) const;
+
+	//! Arrow Extension for non-canonical types.
+	static constexpr const char *ARROW_EXTENSION_NON_CANONICAL = "arrow.opaque";
+
+private:
+	//! The extension name (e.g., 'arrow.uuid', 'arrow.opaque',...)
+	string extension_name {};
+	//! If the extension name is 'arrow.opaque' a vendor and type must be defined.
+	//! The vendor_name is the system that produced the type (e.g., DuckDB)
+	string vendor_name {};
+	//! The type_name is the name of the type produced by the vendor (e.g., hugeint)
+	string type_name {};
+	//! The arrow format (e.g., z)
+	string arrow_format {};
+};
+
+class ArrowTypeExtension;
+
+typedef void (*populate_arrow_schema_t)(DuckDBArrowSchemaHolder &root_holder, ArrowSchema &child,
+                                        const LogicalType &type, ClientContext &context,
+                                        const ArrowTypeExtension &extension);
+
+typedef unique_ptr<ArrowType> (*get_type_t)(const ArrowSchema &schema, const ArrowSchemaMetadata &schema_metadata);
+
+class ArrowTypeExtension {
+public:
+	ArrowTypeExtension() {};
+	//! This type is not registered, so we just use whatever is the format and hope for the best
+	explicit ArrowTypeExtension(ArrowExtensionMetadata &extension_metadata, unique_ptr<ArrowType> type);
+	//! We either have simple extensions where we only return one type
+	ArrowTypeExtension(string extension_name, string arrow_format, shared_ptr<ArrowTypeExtensionData> type);
+	ArrowTypeExtension(string vendor_name, string type_name, string arrow_format,
+	                   shared_ptr<ArrowTypeExtensionData> type);
+
+	//! We have complex extensions, where we can return multiple types, hence we must have callback functions to do so
+	ArrowTypeExtension(string extension_name, populate_arrow_schema_t populate_arrow_schema, get_type_t get_type,
+	                   shared_ptr<ArrowTypeExtensionData> type);
+	ArrowTypeExtension(string vendor_name, string type_name, populate_arrow_schema_t populate_arrow_schema,
+	                   get_type_t get_type, shared_ptr<ArrowTypeExtensionData> type, cast_arrow_duck_t arrow_to_duckdb,
+	                   cast_duck_arrow_t duckdb_to_arrow);
+
+	ArrowExtensionMetadata GetInfo() const;
+
+	unique_ptr<ArrowType> GetType(const ArrowSchema &schema, const ArrowSchemaMetadata &schema_metadata) const;
+
+	shared_ptr<ArrowTypeExtensionData> GetTypeExtension() const;
+
+	LogicalTypeId GetLogicalTypeId() const;
+
+	LogicalType GetLogicalType() const;
+
+	bool HasType() const;
+
+	static void PopulateArrowSchema(DuckDBArrowSchemaHolder &root_holder, ArrowSchema &child,
+	                                const LogicalType &duckdb_type, ClientContext &context,
+	                                const ArrowTypeExtension &extension);
+
+	//! (Optional) Callback to a function that sets up the arrow schema production
+	populate_arrow_schema_t populate_arrow_schema = nullptr;
+	//! (Optional) Callback to a function that sets up the arrow schema production
+	get_type_t get_type = nullptr;
+
+private:
+	//! Extension Info from Arrow
+	ArrowExtensionMetadata extension_metadata;
+	//! Arrow Extension Type
+	shared_ptr<ArrowTypeExtensionData> type_extension;
+};
+
+struct HashArrowTypeExtension {
+	size_t operator()(ArrowExtensionMetadata const &arrow_extension_info) const noexcept {
+		return arrow_extension_info.GetHash();
+	}
+};
+
+struct TypeInfo {
+	TypeInfo();
+	explicit TypeInfo(const LogicalType &type);
+	explicit TypeInfo(string alias);
+	string alias;
+	LogicalTypeId type;
+	hash_t GetHash() const;
+	bool operator==(const TypeInfo &other) const;
+};
+
+struct HashTypeInfo {
+	size_t operator()(TypeInfo const &type_info) const noexcept {
+		return type_info.GetHash();
+	}
+};
+
+//! The set of encoding functions
+struct ArrowTypeExtensionSet {
+	ArrowTypeExtensionSet() {};
+	static void Initialize(const DBConfig &config);
+	std::mutex lock;
+	unordered_map<ArrowExtensionMetadata, ArrowTypeExtension, HashArrowTypeExtension> type_extensions;
+	unordered_map<TypeInfo, vector<ArrowExtensionMetadata>, HashTypeInfo> type_to_info;
+};
+
+} // namespace duckdb
 
 
 
@@ -31387,6 +32073,10 @@ private:
 	const string BindCatalog(string &catalog_name);
 	SchemaCatalogEntry &BindCreateSchema(CreateInfo &info);
 
+	vector<CatalogSearchEntry> GetSearchPath(Catalog &catalog, const string &schema_name);
+
+	LogicalType BindLogicalTypeInternal(const LogicalType &type, optional_ptr<Catalog> catalog, const string &schema);
+
 	unique_ptr<BoundQueryNode> BindSelectNode(SelectNode &statement, unique_ptr<BoundTableRef> from_table);
 
 	unique_ptr<LogicalOperator> BindCopyDatabaseSchema(Catalog &source_catalog, const string &target_database_name);
@@ -32377,6 +33067,377 @@ struct EncodingFunctionSet {
 
 } // namespace duckdb
 
+//===----------------------------------------------------------------------===//
+//                         DuckDB
+//
+// duckdb/logging/log_storage.hpp
+//
+//
+//===----------------------------------------------------------------------===//
+
+
+
+//===----------------------------------------------------------------------===//
+//                         DuckDB
+//
+// duckdb/logging/logger.hpp
+//
+//
+//===----------------------------------------------------------------------===//
+
+
+
+//===----------------------------------------------------------------------===//
+//                         DuckDB
+//
+// duckdb/logging/log_storage.hpp
+//
+//
+//===----------------------------------------------------------------------===//
+
+
+
+
+
+
+
+
+
+
+namespace duckdb {
+
+// Note: `LOG_` prefix is to avoid problems with DEBUG and ERROR macros, these are ToString-ed without the prefix
+enum class LogLevel : uint8_t {
+	LOG_TRACE = 10,
+	LOG_DEBUG = 20,
+	LOG_INFO = 30,
+	LOG_WARN = 40,
+	LOG_ERROR = 50,
+	LOG_FATAL = 60
+};
+
+enum class LogContextScope : uint8_t { DATABASE = 10, CONNECTION = 20, THREAD = 30 };
+
+enum class LogMode : uint8_t { LEVEL_ONLY = 0, DISABLE_SELECTED = 1, ENABLE_SELECTED = 2 };
+
+struct LogConfig {
+	constexpr static const char *IN_MEMORY_STORAGE_NAME = "memory";
+	constexpr static const char *STDOUT_STORAGE_NAME = "stdout";
+	constexpr static const char *FILE_STORAGE_NAME = "file";
+
+	constexpr static LogLevel DEFAULT_LOG_LEVEL = LogLevel::LOG_INFO;
+	constexpr static const char *DEFAULT_LOG_STORAGE = IN_MEMORY_STORAGE_NAME;
+
+	LogConfig();
+
+	DUCKDB_API static LogConfig Create(bool enabled, LogLevel level);
+	DUCKDB_API static LogConfig CreateFromEnabled(bool enabled, LogLevel level,
+	                                              unordered_set<string> &enabled_log_types);
+	DUCKDB_API static LogConfig CreateFromDisabled(bool enabled, LogLevel level,
+	                                               unordered_set<string> &disabled_log_types);
+
+	DUCKDB_API bool IsConsistent() const;
+
+	bool enabled;
+	LogMode mode;
+	LogLevel level;
+	string storage;
+
+	unordered_set<string> enabled_log_types;
+	unordered_set<string> disabled_log_types;
+
+protected:
+	LogConfig(bool enabled, LogLevel level, LogMode mode, optional_ptr<unordered_set<string>> enabled_log_types,
+	          optional_ptr<unordered_set<string>> disable_loggers);
+};
+
+struct LoggingContext {
+	explicit LoggingContext(LogContextScope scope_p) : scope(scope_p) {
+	}
+
+	LogContextScope scope;
+
+	optional_idx thread;
+	optional_idx client_context;
+	optional_idx transaction_id;
+};
+
+struct RegisteredLoggingContext {
+	idx_t context_id;
+	LoggingContext context;
+};
+
+} // namespace duckdb
+
+
+
+
+#include <functional>
+
+namespace duckdb {
+class TableDescription;
+class DatabaseInstance;
+class DataChunk;
+class LogManager;
+class ColumnDataCollection;
+class ThreadContext;
+class FileOpener;
+class LogStorage;
+class ExecutionContext;
+
+//! Logger Macro's are preferred method of calling logger
+#define DUCKDB_LOG(SOURCE, TYPE, LEVEL, ...)                                                                           \
+	{                                                                                                                  \
+		auto &logger = Logger::Get(SOURCE);                                                                            \
+		if (logger.ShouldLog(TYPE, LEVEL)) {                                                                           \
+			logger.WriteLog(TYPE, LEVEL, __VA_ARGS__);                                                                 \
+		}                                                                                                              \
+	}
+
+//! Use below macros to write to logger.
+// Parameters:
+//		SOURCE: the context to fetch the logger from, e.g. the ClientContext, or the DatabaseInstance, see Logger::Get
+//		TYPE  : a string describing the type of this log entry. Preferred format: `<duckdb/extension name>(.<sometype>)
+//				e.g. `duckdb.Extensions.ExtensionAutoloaded`, `my_extension` or `my_extension.some_type`
+//		PARAMS: Either a string-like type such as `const char *`, `string` or `string_t` or a format string plus the
+// 			string parameters
+//
+// Examples:
+//		DUCKDB_LOG_TRACE(client_context, "duckdb", "Something happened");
+//		DUCKDB_LOG_INFO(database_instance, "duckdb", CallFunctionThatReturnsString());
+//
+#define DUCKDB_LOG_TRACE(SOURCE, TYPE, ...) DUCKDB_LOG(SOURCE, TYPE, LogLevel::LOG_TRACE, __VA_ARGS__)
+#define DUCKDB_LOG_DEBUG(SOURCE, TYPE, ...) DUCKDB_LOG(SOURCE, TYPE, LogLevel::LOG_DEBUG, __VA_ARGS__)
+#define DUCKDB_LOG_INFO(SOURCE, TYPE, ...)  DUCKDB_LOG(SOURCE, TYPE, LogLevel::LOG_INFO, __VA_ARGS__)
+#define DUCKDB_LOG_WARN(SOURCE, TYPE, ...)  DUCKDB_LOG(SOURCE, TYPE, LogLevel::LOG_WARN, __VA_ARGS__)
+#define DUCKDB_LOG_ERROR(SOURCE, TYPE, ...) DUCKDB_LOG(SOURCE, TYPE, LogLevel::LOG_ERROR, __VA_ARGS__)
+#define DUCKDB_LOG_FATAL(SOURCE, TYPE, ...) DUCKDB_LOG(SOURCE, TYPE, LogLevel::LOG_FATAL, __VA_ARGS__)
+
+//! Main logging interface
+class Logger {
+public:
+	DUCKDB_API explicit Logger(LogManager &manager) : manager(manager) {
+	}
+
+	DUCKDB_API virtual ~Logger() = default;
+
+	// Main Logging interface. In most cases the macros above should be used instead of calling these directly
+	DUCKDB_API virtual bool ShouldLog(const char *log_type, LogLevel log_level) = 0;
+	DUCKDB_API virtual void WriteLog(const char *log_type, LogLevel log_level, const char *message) = 0;
+
+	// Some more string types for easy logging
+	DUCKDB_API void WriteLog(const char *log_type, LogLevel log_level, const string &message);
+	DUCKDB_API void WriteLog(const char *log_type, LogLevel log_level, const string_t &message);
+
+	// Syntactic sugar for formatted strings
+	template <typename... ARGS>
+	void WriteLog(const char *log_type, LogLevel log_level, const char *format_string, ARGS... params) {
+		auto formatted_string = StringUtil::Format(format_string, params...);
+		WriteLog(log_type, log_level, formatted_string.c_str());
+	}
+
+	DUCKDB_API virtual void Flush() = 0;
+
+	// Get the Logger to write log messages to. In decreasing order of preference(!) so the ThreadContext getter is the
+	// most preferred way of fetching the logger and the DatabaseInstance getter the least preferred. This has to do
+	// both with logging performance and level of detail of logging context that is provided.
+	DUCKDB_API static Logger &Get(const ThreadContext &thread_context);
+	DUCKDB_API static Logger &Get(const ExecutionContext &execution_context);
+	DUCKDB_API static Logger &Get(const ClientContext &client_context);
+	DUCKDB_API static Logger &Get(const FileOpener &opener);
+	DUCKDB_API static Logger &Get(const DatabaseInstance &db);
+
+	template <class T>
+	static void Flush(T &log_context_source) {
+		Get(log_context_source).Flush();
+	}
+
+	DUCKDB_API virtual bool IsThreadSafe() = 0;
+	DUCKDB_API virtual bool IsMutable() {
+		return false;
+	};
+	DUCKDB_API virtual void UpdateConfig(LogConfig &new_config) {
+		throw InternalException("Cannot update the config of this logger!");
+	}
+	DUCKDB_API virtual const LogConfig &GetConfig() const = 0;
+
+protected:
+	LogManager &manager;
+};
+
+// Thread-safe logger
+class ThreadSafeLogger : public Logger {
+public:
+	explicit ThreadSafeLogger(LogConfig &config_p, LoggingContext &context_p, LogManager &manager);
+	explicit ThreadSafeLogger(LogConfig &config_p, RegisteredLoggingContext context_p, LogManager &manager);
+
+	// Main Logger API
+	bool ShouldLog(const char *log_type, LogLevel log_level) override;
+	void WriteLog(const char *log_type, LogLevel log_level, const char *message) override;
+
+	void Flush() override;
+	bool IsThreadSafe() override {
+		return true;
+	}
+	const LogConfig &GetConfig() const override {
+		return config;
+	}
+
+protected:
+	const LogConfig config;
+	mutex lock;
+	const RegisteredLoggingContext context;
+};
+
+// Non Thread-safe logger
+// - will cache log entries locally
+class ThreadLocalLogger : public Logger {
+public:
+	explicit ThreadLocalLogger(LogConfig &config_p, LoggingContext &context_p, LogManager &manager);
+	explicit ThreadLocalLogger(LogConfig &config_p, RegisteredLoggingContext context_p, LogManager &manager);
+
+	// Main Logger API
+	bool ShouldLog(const char *log_type, LogLevel log_level) override;
+	void WriteLog(const char *log_type, LogLevel log_level, const char *message) override;
+	void Flush() override;
+
+	bool IsThreadSafe() override {
+		return false;
+	}
+	const LogConfig &GetConfig() const override {
+		return config;
+	}
+
+protected:
+	const LogConfig config;
+	const RegisteredLoggingContext context;
+};
+
+// Thread-safe Logger with mutable log settings
+class MutableLogger : public Logger {
+public:
+	explicit MutableLogger(LogConfig &config_p, LoggingContext &context_p, LogManager &manager);
+	explicit MutableLogger(LogConfig &config_p, RegisteredLoggingContext context_p, LogManager &manager);
+
+	// Main Logger API
+	bool ShouldLog(const char *log_type, LogLevel log_level) override;
+	void WriteLog(const char *log_type, LogLevel log_level, const char *message) override;
+
+	void Flush() override;
+	bool IsThreadSafe() override {
+		return true;
+	}
+	bool IsMutable() override {
+		return true;
+	}
+	const LogConfig &GetConfig() const override {
+		return config;
+	}
+	void UpdateConfig(LogConfig &new_config) override;
+
+protected:
+	// Atomics for lock-free log setting checks
+	atomic<bool> enabled;
+	atomic<LogMode> mode;
+	atomic<LogLevel> level;
+
+	mutex lock;
+	LogConfig config;
+	const RegisteredLoggingContext context;
+};
+
+// For when logging is disabled: NOPs everything
+class NopLogger : public Logger {
+public:
+	explicit NopLogger(LogManager &manager) : Logger(manager) {
+	}
+	bool ShouldLog(const char *log_type, LogLevel log_level) override {
+		return false;
+	}
+	void WriteLog(const char *log_type, LogLevel log_level, const char *message) override {};
+	void Flush() override {
+	}
+	bool IsThreadSafe() override {
+		return true;
+	}
+	const LogConfig &GetConfig() const override {
+		throw InternalException("Called GetConfig on NopLogger");
+	}
+};
+
+} // namespace duckdb
+
+
+
+
+namespace duckdb {
+
+// Holds global logging state
+// - Handles configuration changes
+// - Creates Loggers with cached configuration
+// - Main sink for logs (either by logging directly into this, or by syncing a pre-cached set of log entries)
+// - Holds the log storage
+class LogManager : public enable_shared_from_this<LogManager> {
+	friend class ThreadSafeLogger;
+	friend class ThreadLocalLogger;
+	friend class MutableLogger;
+
+public:
+	// Note: two step initialization because Logger needs shared pointer to log manager TODO: can we clean up?
+	explicit LogManager(DatabaseInstance &db, LogConfig config = LogConfig());
+	~LogManager();
+	void Initialize();
+
+	DUCKDB_API static LogManager &Get(ClientContext &context);
+	unique_ptr<Logger> CreateLogger(LoggingContext context, bool thread_safe = true, bool mutable_settings = false);
+
+	RegisteredLoggingContext RegisterLoggingContext(LoggingContext &context);
+
+	DUCKDB_API bool RegisterLogStorage(const string &name, shared_ptr<LogStorage> &storage);
+
+	//! The global logger can be used whe
+	DUCKDB_API Logger &GlobalLogger();
+
+	//! Flush everything
+	DUCKDB_API void Flush();
+
+	//! Get a shared_ptr to the log storage (For example, to scan it)
+	DUCKDB_API shared_ptr<LogStorage> GetLogStorage();
+	DUCKDB_API bool CanScan();
+
+	DUCKDB_API void SetEnableLogging(bool enable);
+	DUCKDB_API void SetLogMode(LogMode mode);
+	DUCKDB_API void SetLogLevel(LogLevel level);
+	DUCKDB_API void SetEnabledLogTypes(unordered_set<string> &enabled_log_types);
+	DUCKDB_API void SetDisabledLogTypes(unordered_set<string> &disabled_log_types);
+	DUCKDB_API void SetLogStorage(DatabaseInstance &db, const string &storage_name);
+
+	DUCKDB_API LogConfig GetConfig();
+
+protected:
+	RegisteredLoggingContext RegisterLoggingContextInternal(LoggingContext &context);
+
+	// This is to be called by the Loggers only, it does not verify log_level and log_type
+	void WriteLogEntry(timestamp_t, const char *log_type, LogLevel log_level, const char *log_message,
+	                   const RegisteredLoggingContext &context);
+	// This allows efficiently pushing a cached set of log entries into the log manager
+	void FlushCachedLogEntries(DataChunk &chunk, const RegisteredLoggingContext &context);
+
+	mutex lock;
+	LogConfig config;
+
+	unique_ptr<Logger> global_logger;
+
+	shared_ptr<LogStorage> log_storage;
+
+	idx_t next_registered_logging_context_index = 0;
+
+	// Any additional LogStorages registered (by extensions for example)
+	case_insensitive_map_t<shared_ptr<LogStorage>> registered_log_storages;
+};
+
+} // namespace duckdb
+
 
 namespace duckdb {
 
@@ -32396,6 +33457,7 @@ class CompressionInfo;
 class EncryptionUtil;
 
 struct CompressionFunctionSet;
+struct DatabaseCacheEntry;
 struct DBConfig;
 
 enum class CheckpointAbort : uint8_t {
@@ -32440,6 +33502,8 @@ struct ExtensionOption {
 
 class SerializationCompatibility {
 public:
+	static SerializationCompatibility FromDatabase(AttachedDatabase &db);
+	static SerializationCompatibility FromIndex(idx_t serialization_version);
 	static SerializationCompatibility FromString(const string &input);
 	static SerializationCompatibility Default();
 	static SerializationCompatibility Latest();
@@ -32541,6 +33605,8 @@ struct DBConfigOptions {
 	uint64_t zstd_min_string_length = 4096;
 	//! Force a specific compression method to be used when checkpointing (if available)
 	CompressionType force_compression = CompressionType::COMPRESSION_AUTO;
+	//! The set of disabled compression methods (default empty)
+	set<CompressionType> disabled_compression_methods;
 	//! Force a specific bitpacking mode to be used when using the bitpacking compression method
 	BitpackingMode force_bitpacking_mode = BitpackingMode::AUTO;
 	//! Debug setting for window aggregation mode: (window, combine, separate)
@@ -32620,6 +33686,8 @@ struct DBConfigOptions {
 	unordered_set<string> allowed_paths;
 	//! Directories that are explicitly allowed, even if enable_external_access is false
 	set<string> allowed_directories;
+	//! The log configuration
+	LogConfig log_config = LogConfig();
 
 	bool operator==(const DBConfigOptions &other) const;
 };
@@ -32669,6 +33737,8 @@ public:
 	vector<unique_ptr<ExtensionCallback>> extension_callbacks;
 	//! Encryption Util for OpenSSL
 	shared_ptr<EncryptionUtil> encryption_util;
+	//! Reference to the database cache entry (if any)
+	shared_ptr<DatabaseCacheEntry> db_cache_entry;
 
 public:
 	DUCKDB_API static DBConfig &GetConfig(ClientContext &context);
@@ -32709,9 +33779,15 @@ public:
 	//! Returns the encode function matching the encoding name.
 	DUCKDB_API optional_ptr<EncodingFunction> GetEncodeFunction(const string &name) const;
 	DUCKDB_API void RegisterEncodeFunction(const EncodingFunction &function) const;
-
 	//! Returns the encode function names.
 	DUCKDB_API vector<reference<EncodingFunction>> GetLoadedEncodedFunctions() const;
+	//! Returns the encode function matching the encoding name.
+	DUCKDB_API ArrowTypeExtension GetArrowExtension(ArrowExtensionMetadata info) const;
+	DUCKDB_API ArrowTypeExtension GetArrowExtension(const LogicalType &type) const;
+	DUCKDB_API bool HasArrowExtension(const LogicalType &type) const;
+	DUCKDB_API bool HasArrowExtension(ArrowExtensionMetadata info) const;
+	DUCKDB_API void RegisterArrowExtension(const ArrowTypeExtension &extension) const;
+
 	bool operator==(const DBConfig &other);
 	bool operator!=(const DBConfig &other);
 
@@ -32748,6 +33824,7 @@ public:
 private:
 	unique_ptr<CompressionFunctionSet> compression_functions;
 	unique_ptr<EncodingFunctionSet> encoding_functions;
+	unique_ptr<ArrowTypeExtensionSet> arrow_extensions;
 	unique_ptr<CastFunctionSet> cast_functions;
 	unique_ptr<CollationBinding> collation_bindings;
 	unique_ptr<IndexTypeSet> index_types;
@@ -32843,7 +33920,7 @@ public:
 	//! The validity checker of the transaction
 	ValidChecker transaction_validity;
 	//! The active query number
-	transaction_t active_query;
+	atomic<transaction_t> active_query;
 
 public:
 	DUCKDB_API static MetaTransaction &Get(ClientContext &context);
@@ -32998,6 +34075,8 @@ struct StorageOptions {
 	optional_idx block_alloc_size;
 	//! The row group size for this attached database (if any)
 	optional_idx row_group_size;
+	//! Target storage version (if any)
+	optional_idx storage_version;
 };
 
 } // namespace duckdb
@@ -33454,7 +34533,7 @@ struct ArrowLargeBufferSizeSetting {
 	using RETURN_TYPE = bool;
 	static constexpr const char *Name = "arrow_large_buffer_size";
 	static constexpr const char *Description =
-	    "If arrow buffers for strings, blobs, uuids and bits should be exported using large buffers";
+	    "Whether Arrow buffers for strings, blobs, uuids and bits should be exported using large buffers";
 	static constexpr const char *InputType = "BOOLEAN";
 	static void SetGlobal(DatabaseInstance *db, DBConfig &config, const Value &parameter);
 	static void ResetGlobal(DatabaseInstance *db, DBConfig &config);
@@ -33477,7 +34556,7 @@ struct ArrowOutputListViewSetting {
 	using RETURN_TYPE = bool;
 	static constexpr const char *Name = "arrow_output_list_view";
 	static constexpr const char *Description =
-	    "If export to arrow format should use ListView as the physical layout for LIST columns";
+	    "Whether export to Arrow format should use ListView as the physical layout for LIST columns";
 	static constexpr const char *InputType = "BOOLEAN";
 	static void SetGlobal(DatabaseInstance *db, DBConfig &config, const Value &parameter);
 	static void ResetGlobal(DatabaseInstance *db, DBConfig &config);
@@ -33685,10 +34764,30 @@ struct DefaultSecretStorageSetting {
 	static Value GetSetting(const ClientContext &context);
 };
 
+struct DisabledCompressionMethodsSetting {
+	using RETURN_TYPE = string;
+	static constexpr const char *Name = "disabled_compression_methods";
+	static constexpr const char *Description = "Disable a specific set of compression methods (comma separated)";
+	static constexpr const char *InputType = "VARCHAR";
+	static void SetGlobal(DatabaseInstance *db, DBConfig &config, const Value &parameter);
+	static void ResetGlobal(DatabaseInstance *db, DBConfig &config);
+	static Value GetSetting(const ClientContext &context);
+};
+
 struct DisabledFilesystemsSetting {
 	using RETURN_TYPE = string;
 	static constexpr const char *Name = "disabled_filesystems";
 	static constexpr const char *Description = "Disable specific file systems preventing access (e.g. LocalFileSystem)";
+	static constexpr const char *InputType = "VARCHAR";
+	static void SetGlobal(DatabaseInstance *db, DBConfig &config, const Value &parameter);
+	static void ResetGlobal(DatabaseInstance *db, DBConfig &config);
+	static Value GetSetting(const ClientContext &context);
+};
+
+struct DisabledLogTypes {
+	using RETURN_TYPE = string;
+	static constexpr const char *Name = "disabled_log_types";
+	static constexpr const char *Description = "Sets the list of disabled loggers";
 	static constexpr const char *InputType = "VARCHAR";
 	static void SetGlobal(DatabaseInstance *db, DBConfig &config, const Value &parameter);
 	static void ResetGlobal(DatabaseInstance *db, DBConfig &config);
@@ -33771,6 +34870,16 @@ struct EnableHTTPMetadataCacheSetting {
 	static Value GetSetting(const ClientContext &context);
 };
 
+struct EnableLogging {
+	using RETURN_TYPE = bool;
+	static constexpr const char *Name = "enable_logging";
+	static constexpr const char *Description = "Enables the logger";
+	static constexpr const char *InputType = "BOOLEAN";
+	static void SetGlobal(DatabaseInstance *db, DBConfig &config, const Value &parameter);
+	static void ResetGlobal(DatabaseInstance *db, DBConfig &config);
+	static Value GetSetting(const ClientContext &context);
+};
+
 struct EnableMacroDependenciesSetting {
 	using RETURN_TYPE = bool;
 	static constexpr const char *Name = "enable_macro_dependencies";
@@ -33833,6 +34942,16 @@ struct EnableViewDependenciesSetting {
 	static constexpr const char *Description =
 	    "Enable created VIEWs to create dependencies on the referenced objects (such as tables)";
 	static constexpr const char *InputType = "BOOLEAN";
+	static void SetGlobal(DatabaseInstance *db, DBConfig &config, const Value &parameter);
+	static void ResetGlobal(DatabaseInstance *db, DBConfig &config);
+	static Value GetSetting(const ClientContext &context);
+};
+
+struct EnabledLogTypes {
+	using RETURN_TYPE = string;
+	static constexpr const char *Name = "enabled_log_types";
+	static constexpr const char *Description = "Sets the list of enabled loggers";
+	static constexpr const char *InputType = "VARCHAR";
 	static void SetGlobal(DatabaseInstance *db, DBConfig &config, const Value &parameter);
 	static void ResetGlobal(DatabaseInstance *db, DBConfig &config);
 	static Value GetSetting(const ClientContext &context);
@@ -34019,6 +35138,17 @@ struct IntegerDivisionSetting {
 	static Value GetSetting(const ClientContext &context);
 };
 
+struct LateMaterializationMaxRowsSetting {
+	using RETURN_TYPE = idx_t;
+	static constexpr const char *Name = "late_materialization_max_rows";
+	static constexpr const char *Description =
+	    "The maximum amount of rows in the LIMIT/SAMPLE for which we trigger late materialization";
+	static constexpr const char *InputType = "UBIGINT";
+	static void SetLocal(ClientContext &context, const Value &parameter);
+	static void ResetLocal(ClientContext &context);
+	static Value GetSetting(const ClientContext &context);
+};
+
 struct LockConfigurationSetting {
 	using RETURN_TYPE = bool;
 	static constexpr const char *Name = "lock_configuration";
@@ -34037,6 +35167,36 @@ struct LogQueryPathSetting {
 	static constexpr const char *InputType = "VARCHAR";
 	static void SetLocal(ClientContext &context, const Value &parameter);
 	static void ResetLocal(ClientContext &context);
+	static Value GetSetting(const ClientContext &context);
+};
+
+struct LoggingLevel {
+	using RETURN_TYPE = string;
+	static constexpr const char *Name = "logging_level";
+	static constexpr const char *Description = "The log level which will be recorded in the log";
+	static constexpr const char *InputType = "VARCHAR";
+	static void SetGlobal(DatabaseInstance *db, DBConfig &config, const Value &parameter);
+	static void ResetGlobal(DatabaseInstance *db, DBConfig &config);
+	static Value GetSetting(const ClientContext &context);
+};
+
+struct LoggingMode {
+	using RETURN_TYPE = string;
+	static constexpr const char *Name = "logging_mode";
+	static constexpr const char *Description = "Enables the logger";
+	static constexpr const char *InputType = "VARCHAR";
+	static void SetGlobal(DatabaseInstance *db, DBConfig &config, const Value &parameter);
+	static void ResetGlobal(DatabaseInstance *db, DBConfig &config);
+	static Value GetSetting(const ClientContext &context);
+};
+
+struct LoggingStorage {
+	using RETURN_TYPE = string;
+	static constexpr const char *Name = "logging_storage";
+	static constexpr const char *Description = "Set the logging storage (memory/stdout/file)";
+	static constexpr const char *InputType = "VARCHAR";
+	static void SetGlobal(DatabaseInstance *db, DBConfig &config, const Value &parameter);
+	static void ResetGlobal(DatabaseInstance *db, DBConfig &config);
 	static Value GetSetting(const ClientContext &context);
 };
 
@@ -34236,7 +35396,7 @@ struct ProduceArrowStringViewSetting {
 	using RETURN_TYPE = bool;
 	static constexpr const char *Name = "produce_arrow_string_view";
 	static constexpr const char *Description =
-	    "If strings should be produced by DuckDB in Utf8View format instead of Utf8";
+	    "Whether strings should be produced by DuckDB in Utf8View format instead of Utf8";
 	static constexpr const char *InputType = "BOOLEAN";
 	static void SetGlobal(DatabaseInstance *db, DBConfig &config, const Value &parameter);
 	static void ResetGlobal(DatabaseInstance *db, DBConfig &config);
@@ -34777,7 +35937,7 @@ class RegisteredStateManager;
 struct PendingQueryParameters {
 	//! Prepared statement parameters (if any)
 	optional_ptr<case_insensitive_map_t<BoundParameterData>> parameters;
-	//! Whether or not a stream result should be allowed
+	//! Whether a stream result should be allowed
 	bool allow_stream_result = false;
 };
 
@@ -34801,6 +35961,8 @@ public:
 	atomic<bool> interrupted;
 	//! Set of optional states (e.g. Caches) that can be held by the ClientContext
 	unique_ptr<RegisteredStateManager> registered_state;
+	//! The logger to be used by this ClientContext
+	unique_ptr<Logger> logger;
 	//! The client configuration
 	ClientConfig config;
 	//! The set of client-specific data
@@ -34920,13 +36082,16 @@ public:
 	//! Returns the current executor
 	Executor &GetExecutor();
 
+	//! Return the current logger
+	Logger &GetLogger() const;
+
 	//! Returns the current query string (if any)
 	const string &GetCurrentQuery();
 
 	//! Fetch a list of table names that are required for a given query
 	DUCKDB_API unordered_set<string> GetTableNames(const string &query);
 
-	DUCKDB_API ClientProperties GetClientProperties() const;
+	DUCKDB_API ClientProperties GetClientProperties();
 
 	//! Returns true if execution of the current query is finished
 	DUCKDB_API bool ExecutionIsFinished();
@@ -35531,14 +36696,6 @@ public:
 	DUCKDB_API shared_ptr<Relation> RelationFromQuery(unique_ptr<SelectStatement> select_stmt,
 	                                                  const string &alias = "queryrelation", const string &query = "");
 
-	//! Returns a substrait BLOB from a valid query
-	DUCKDB_API string GetSubstrait(const string &query);
-	//! Returns a Query Result from a substrait blob
-	DUCKDB_API unique_ptr<QueryResult> FromSubstrait(const string &proto);
-	//! Returns a substrait BLOB from a valid query
-	DUCKDB_API string GetSubstraitJSON(const string &query);
-	//! Returns a Query Result from a substrait JSON
-	DUCKDB_API unique_ptr<QueryResult> FromSubstraitJSON(const string &json);
 	DUCKDB_API void BeginTransaction();
 	DUCKDB_API void Commit();
 	DUCKDB_API void Rollback();
@@ -35639,87 +36796,6 @@ private:
 
 
 
-
-
-
-//===----------------------------------------------------------------------===//
-//                         DuckDB
-//
-// duckdb/main/extension.hpp
-//
-//
-//===----------------------------------------------------------------------===//
-
-
-
-
-
-
-namespace duckdb {
-class DuckDB;
-
-//! The Extension class is the base class used to define extensions
-class Extension {
-public:
-	DUCKDB_API virtual ~Extension();
-
-	DUCKDB_API virtual void Load(DuckDB &db) = 0;
-	DUCKDB_API virtual std::string Name() = 0;
-	DUCKDB_API virtual std::string Version() const {
-		return "";
-	}
-};
-
-enum class ExtensionABIType : uint8_t {
-	UNKNOWN = 0,
-	//! Uses C++ ABI, version needs to match precisely
-	CPP = 1,
-	//! Uses C ABI using the duckdb_ext_api_v1 struct, version needs to be equal or higher
-	C_STRUCT = 2,
-	//! Uses C ABI using the duckdb_ext_api_v1 struct including "unstable" functions, version needs to match precisely
-	C_STRUCT_UNSTABLE = 3
-};
-
-//! The parsed extension metadata footer
-struct ParsedExtensionMetaData {
-	static constexpr const idx_t FOOTER_SIZE = 512;
-	static constexpr const idx_t SIGNATURE_SIZE = 256;
-	static constexpr const char *EXPECTED_MAGIC_VALUE = {
-	    "4\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0"};
-
-	string magic_value;
-
-	ExtensionABIType abi_type;
-
-	string platform;
-	// (For ExtensionABIType::CPP or ExtensionABIType::C_STRUCT_UNSTABLE) the DuckDB version this extension is compiled
-	// for
-	string duckdb_version;
-	// (only for ExtensionABIType::C_STRUCT) the CAPI version of the C_STRUCT (Currently interpreted as the minimum
-	// DuckDB version)
-	string duckdb_capi_version;
-	string extension_version;
-	string signature;
-	string extension_abi_metadata;
-
-	bool AppearsValid() {
-		return magic_value == EXPECTED_MAGIC_VALUE;
-	}
-
-	// Returns an error string describing which parts of the metadata are mismatcheds
-	string GetInvalidMetadataError();
-};
-
-struct VersioningUtils {
-	//! Note: only supports format v{major}.{minor}.{patch}
-	static bool ParseSemver(string &semver, idx_t &major_out, idx_t &minor_out, idx_t &patch_out);
-
-	//! Note: only supports format v{major}.{minor}.{patch}
-	static bool IsSupportedCAPIVersion(string &capi_version_string);
-	static bool IsSupportedCAPIVersion(idx_t major, idx_t minor, idx_t patch);
-};
-
-} // namespace duckdb
 
 
 
@@ -36183,6 +37259,13 @@ typedef struct {
 	                                        duckdb_arrow_schema arrow_schema, duckdb_arrow_array arrow_array,
 	                                        duckdb_arrow_stream *out_stream);
 	duckdb_data_chunk (*duckdb_stream_fetch_chunk)(duckdb_result result);
+	// Exposing the instance cache
+
+	duckdb_instance_cache (*duckdb_create_instance_cache)();
+	duckdb_state (*duckdb_get_or_create_from_cache)(duckdb_instance_cache instance_cache, const char *path,
+	                                                duckdb_database *out_database, duckdb_config config,
+	                                                char **out_error);
+	void (*duckdb_destroy_instance_cache)(duckdb_instance_cache *instance_cache);
 	// New append functions that are added
 
 	duckdb_state (*duckdb_append_default_to_chunk)(duckdb_appender appender, duckdb_data_chunk chunk, idx_t col,
@@ -36598,6 +37681,9 @@ inline duckdb_ext_api_v1 CreateAPIv1() {
 	result.duckdb_arrow_scan = duckdb_arrow_scan;
 	result.duckdb_arrow_array_scan = duckdb_arrow_array_scan;
 	result.duckdb_stream_fetch_chunk = duckdb_stream_fetch_chunk;
+	result.duckdb_create_instance_cache = duckdb_create_instance_cache;
+	result.duckdb_get_or_create_from_cache = duckdb_get_or_create_from_cache;
+	result.duckdb_destroy_instance_cache = duckdb_destroy_instance_cache;
 	result.duckdb_append_default_to_chunk = duckdb_append_default_to_chunk;
 	return result;
 }
@@ -36606,6 +37692,87 @@ inline duckdb_ext_api_v1 CreateAPIv1() {
 #define DUCKDB_EXTENSION_API_VERSION_MINOR  2
 #define DUCKDB_EXTENSION_API_VERSION_PATCH  0
 #define DUCKDB_EXTENSION_API_VERSION_STRING "v1.2.0"
+
+
+//===----------------------------------------------------------------------===//
+//                         DuckDB
+//
+// duckdb/main/extension.hpp
+//
+//
+//===----------------------------------------------------------------------===//
+
+
+
+
+
+
+namespace duckdb {
+class DuckDB;
+
+//! The Extension class is the base class used to define extensions
+class Extension {
+public:
+	DUCKDB_API virtual ~Extension();
+
+	DUCKDB_API virtual void Load(DuckDB &db) = 0;
+	DUCKDB_API virtual std::string Name() = 0;
+	DUCKDB_API virtual std::string Version() const {
+		return "";
+	}
+	DUCKDB_API static const char *DefaultVersion();
+};
+
+enum class ExtensionABIType : uint8_t {
+	UNKNOWN = 0,
+	//! Uses C++ ABI, version needs to match precisely
+	CPP = 1,
+	//! Uses C ABI using the duckdb_ext_api_v1 struct, version needs to be equal or higher
+	C_STRUCT = 2,
+	//! Uses C ABI using the duckdb_ext_api_v1 struct including "unstable" functions, version needs to match precisely
+	C_STRUCT_UNSTABLE = 3
+};
+
+//! The parsed extension metadata footer
+struct ParsedExtensionMetaData {
+	static constexpr const idx_t FOOTER_SIZE = 512;
+	static constexpr const idx_t SIGNATURE_SIZE = 256;
+	static constexpr const char *EXPECTED_MAGIC_VALUE = {
+	    "4\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0"};
+
+	string magic_value;
+
+	ExtensionABIType abi_type;
+
+	string platform;
+	// (For ExtensionABIType::CPP or ExtensionABIType::C_STRUCT_UNSTABLE) the DuckDB version this extension is compiled
+	// for
+	string duckdb_version;
+	// (only for ExtensionABIType::C_STRUCT) the CAPI version of the C_STRUCT (Currently interpreted as the minimum
+	// DuckDB version)
+	string duckdb_capi_version;
+	string extension_version;
+	string signature;
+	string extension_abi_metadata;
+
+	bool AppearsValid() {
+		return magic_value == EXPECTED_MAGIC_VALUE;
+	}
+
+	// Returns an error string describing which parts of the metadata are mismatcheds
+	string GetInvalidMetadataError();
+};
+
+struct VersioningUtils {
+	//! Note: only supports format v{major}.{minor}.{patch}
+	static bool ParseSemver(string &semver, idx_t &major_out, idx_t &minor_out, idx_t &patch_out);
+
+	//! Note: only supports format v{major}.{minor}.{patch}
+	static bool IsSupportedCAPIVersion(string &capi_version_string);
+	static bool IsSupportedCAPIVersion(idx_t major, idx_t minor, idx_t patch);
+};
+
+} // namespace duckdb
 
 //===----------------------------------------------------------------------===//
 //                         DuckDB
@@ -36705,6 +37872,7 @@ struct ExtensionRepository {
 
 
 
+
 namespace duckdb {
 class BufferManager;
 class DatabaseManager;
@@ -36719,6 +37887,7 @@ struct AttachInfo;
 struct AttachOptions;
 class DatabaseFileSystem;
 struct DatabaseCacheEntry;
+class LogManager;
 
 struct ExtensionInfo {
 	bool is_loaded;
@@ -36746,6 +37915,7 @@ public:
 	DUCKDB_API ObjectCache &GetObjectCache();
 	DUCKDB_API ConnectionManager &GetConnectionManager();
 	DUCKDB_API ValidChecker &GetValidChecker();
+	DUCKDB_API LogManager &GetLogManager() const;
 	DUCKDB_API void SetExtensionLoaded(const string &extension_name, ExtensionInstallInfo &install_info);
 
 	DUCKDB_API const duckdb_ext_api_v1 GetExtensionAPIV1();
@@ -36764,7 +37934,6 @@ public:
 	                                                    const AttachOptions &options);
 
 	void AddExtensionInfo(const string &name, const ExtensionLoadedInfo &info);
-	void SetDatabaseCacheEntry(shared_ptr<DatabaseCacheEntry> entry);
 
 private:
 	void Initialize(const char *path, DBConfig *config);
@@ -36782,7 +37951,7 @@ private:
 	unordered_map<string, ExtensionInfo> loaded_extensions_info;
 	ValidChecker db_validity;
 	unique_ptr<DatabaseFileSystem> db_file_system;
-	shared_ptr<DatabaseCacheEntry> db_cache_entry;
+	shared_ptr<LogManager> log_manager;
 
 	duckdb_ext_api_v1 (*create_api_v1)();
 };
@@ -39392,13 +40561,36 @@ void SetError(struct AdbcError *error, const std::string &message);
 
 
 
+#include <list>
 
 namespace duckdb {
-
+class ArrowTypeExtensionData;
+struct DBConfig;
 struct ArrowConverter {
 	DUCKDB_API static void ToArrowSchema(ArrowSchema *out_schema, const vector<LogicalType> &types,
-	                                     const vector<string> &names, const ClientProperties &options);
-	DUCKDB_API static void ToArrowArray(DataChunk &input, ArrowArray *out_array, ClientProperties options);
+	                                     const vector<string> &names, ClientProperties &options);
+	DUCKDB_API static void
+	ToArrowArray(DataChunk &input, ArrowArray *out_array, ClientProperties options,
+	             const unordered_map<idx_t, const shared_ptr<ArrowTypeExtensionData>> &extension_type_cast);
+};
+
+//===--------------------------------------------------------------------===//
+// Arrow Schema
+//===--------------------------------------------------------------------===//
+struct DuckDBArrowSchemaHolder {
+	// unused in children
+	vector<ArrowSchema> children;
+	// unused in children
+	vector<ArrowSchema *> children_ptrs;
+	//! used for nested structures
+	std::list<vector<ArrowSchema>> nested_children;
+	std::list<vector<ArrowSchema *>> nested_children_ptr;
+	//! This holds strings created to represent decimal types
+	vector<unsafe_unique_array<char>> owned_type_names;
+	vector<unsafe_unique_array<char>> owned_column_names;
+	//! This holds any values created for metadata info
+	vector<unsafe_unique_array<char>> metadata_info;
+	vector<unsafe_unique_array<char>> extension_format;
 };
 
 } // namespace duckdb
@@ -39903,16 +41095,21 @@ public:
 
 
 namespace duckdb {
+class Allocator;
 
 class MemoryStream : public WriteStream, public ReadStream {
 private:
+	optional_ptr<Allocator> allocator;
 	idx_t position;
 	idx_t capacity;
-	bool owns_data;
 	data_ptr_t data;
 
 public:
 	static constexpr idx_t DEFAULT_INITIAL_CAPACITY = 512;
+
+	// Create a new owning MemoryStream with an internal  backing buffer with the specified capacity. The stream will
+	// own the backing buffer, resize it when needed and free its memory when the stream is destroyed
+	explicit MemoryStream(Allocator &allocator, idx_t capacity = DEFAULT_INITIAL_CAPACITY);
 
 	// Create a new owning MemoryStream with an internal  backing buffer with the specified capacity. The stream will
 	// own the backing buffer, resize it when needed and free its memory when the stream is destroyed
@@ -39922,6 +41119,13 @@ public:
 	// ownership of the backing buffer, will not attempt to resize it and will not free the memory when the stream
 	// is destroyed
 	explicit MemoryStream(data_ptr_t buffer, idx_t capacity);
+
+	// Cant copy!
+	MemoryStream(const MemoryStream &) = delete;
+	MemoryStream &operator=(const MemoryStream &) = delete;
+
+	MemoryStream(MemoryStream &&other) noexcept;
+	MemoryStream &operator=(MemoryStream &&other) noexcept;
 
 	~MemoryStream() override;
 
