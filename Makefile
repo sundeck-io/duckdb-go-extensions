@@ -1,8 +1,8 @@
 DUCKDB_REPO=https://github.com/duckdb/duckdb.git
 DUCKDB_REF=5f5512b827df6397afd31daedb4bbdee76520019
 
-CFLAGS   = -O3
-CXXFLAGS = -O3
+CFLAGS   = -O0
+CXXFLAGS = -O0
 CC 		 = ""
 CXX      = ""
 DEP_NAME = ""
@@ -18,10 +18,10 @@ DUCKDB_COMMON_BUILD_FLAGS := BUILD_SHELL=0 DISABLE_SHELL=1 STATIC_LIBCPP=0 BUILD
 
 CORE_COMMAND =  \
 	cd duckdb && \
-	CC=${CC} CXX=${CXX} VCPKG_TARGET_TRIPLET=${VCPKG_TARGET_TRIPLET} OSX_BUILD_ARCH=${OSX_BUILD_ARCH} ${DUCKDB_COMMON_BUILD_FLAGS} make extension_configuration bundle-library -j 2 && \
+	CC=${CC} CXX=${CXX} VCPKG_TARGET_TRIPLET=${VCPKG_TARGET_TRIPLET} OSX_BUILD_ARCH=${OSX_BUILD_ARCH} ${DUCKDB_COMMON_BUILD_FLAGS} make extension_configuration debug -j 2 && \
 	cd ../ && \
-	cp duckdb/build/release/src/libduckdb.* deps/${DEP_NAME}/ && \
-	find duckdb/build/release/repository -name '*.duckdb_extension' -exec cp {} deps/${DEP_NAME}/ \;
+	cp duckdb/build/debug/src/libduckdb.* deps/${DEP_NAME}/ && \
+	find duckdb/build/debug/repository -name '*.duckdb_extension' -exec cp {} deps/${DEP_NAME}/ \;
 
 
 OS := $(shell uname -s | tr '[:upper:]' '[:lower:]')  # Get OS name in lowercase
