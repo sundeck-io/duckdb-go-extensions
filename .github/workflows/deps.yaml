@@ -19,7 +19,7 @@ concurrency:
 
 jobs:
   headers:
-    runs-on: ubuntu-20.04
+    runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v4
       - shell: bash
@@ -97,7 +97,7 @@ jobs:
           path: deps/darwin_arm64/*
           retention-days: 1
   linux_amd64:
-    runs-on: ubuntu-20.04
+    runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v4
       - uses: seanmiddleditch/gha-setup-ninja@master
@@ -128,7 +128,7 @@ jobs:
           path: deps/linux_amd64/*
           retention-days: 1
   linux_arm64:
-    runs-on: ubuntu-20.04
+    runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v4
       - uses: seanmiddleditch/gha-setup-ninja@master
