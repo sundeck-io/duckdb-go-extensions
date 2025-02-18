@@ -1,0 +1,53 @@
+name: duckdb-ref-update
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '0 4 * * 6'  # Every Saturday at 4 AM US time (America/New_York)
+
+concurrency:
+  group: "${{ github.workflow }}-${{ github.run_started_at }}"
+  cancel-in-progress: true
+
+jobs:
+  update-duckdb-refs:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Fetch and Update All Refs
+        id: fetch-update-refs
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          source ./.github/scripts/duckdb-ref-update.sh
+          COMMIT_DETAILS=""
+
+          repos='[
+            {"repository": "duckdb/duckdb", "ref_var": "DUCKDB_REF", "ref_type": "release"},
+            {"repository": "duckdb/duckdb-aws", "ref_var": "DUCKDB_AWS_REF", "ref_type": "tip"},
+            {"repository": "duckdb/duckdb-httpfs", "ref_var": "DUCKDB_HTTPFS_REF", "ref_type": "tip"},
+            {"repository": "substrait-io/duckdb-substrait-extension", "ref_var": "DUCKDB_SUBSTRAIT_REF", "ref_type": "tip"},
+            {"repository": "duckdb/duckdb-iceberg", "ref_var": "DUCKDB_ICEBERG_REF", "ref_type": "tip"}
+          ]'
+
+          echo "$repos" | jq -c '.[]' | while read -r repo; do
+            REPO=$(echo "$repo" | jq -r '.repository')
+            REF_VAR=$(echo "$repo" | jq -r '.ref_var')
+            REF_TYPE=$(echo "$repo" | jq -r '.ref_type')
+
+            echo "Processing $REPO with $REF_VAR and $REF_TYPE"
+            LATEST_REF=$(fetch_latest_ref "$REPO" "$REF_TYPE")
+            echo "Latest ref: $LATEST_REF"
+            UPDATE_OUTPUT=$(update_makefile "$REF_VAR" "$LATEST_REF")
+            if [[ -n "$UPDATE_OUTPUT" ]]; then
+              COMMIT_DETAILS+=$'\n'"$UPDATE_OUTPUT"
+            fi
+          done
+
+          echo "COMMIT_DETAILS=$COMMIT_DETAILS" >> "$GITHUB_ENV"
+      - name: Commit and Push Updates
+        uses: stefanzweifel/git-auto-commit-action@v5
+        with:
+          commit_message: |
+            Update DuckDB references:${{ env.COMMIT_DETAILS }}
