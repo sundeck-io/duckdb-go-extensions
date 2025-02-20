@@ -1,6 +1,11 @@
 DUCKDB_REPO=https://github.com/duckdb/duckdb.git
 DUCKDB_REF=5f5512b827df6397afd31daedb4bbdee76520019
 
+export DUCKDB_AWS_REF=b3050f35c6e99fa35465230493eeab14a78a0409
+export DUCKDB_HTTPFS_REF=85ac4667bcb0d868199e156f8dd918b0278db7b9
+export DUCKDB_SUBSTRAIT_REF=a1b341cc3df16c55535c12acce375040ffe50347
+export DUCKDB_ICEBERG_REF=3060b30309d82f1059c928de7280286fcf800545
+
 CFLAGS   = -O3
 CXXFLAGS = -O3
 CC 		 = ""
@@ -51,7 +56,7 @@ duckdb:
 	rm -rf duckdb
 	git clone --depth 1 $(DUCKDB_REPO) duckdb
 	cd duckdb && git fetch --depth 1 origin $(DUCKDB_REF) && git checkout $(DUCKDB_REF)
-	cp extension_config_local.cmake duckdb/extension/extension_config.cmake
+	envsubst < extension_config_local.cmake > duckdb/extension/extension_config.cmake
 
 .PHONY: deps.header
 deps.header: duckdb
