@@ -7,7 +7,6 @@ import (
 	"testing"
 )
 
-
 func TestExtensions(t *testing.T) {
 	t.Parallel()
 
@@ -26,7 +25,7 @@ func TestExtensions(t *testing.T) {
 		)
 		res := db.QueryRow("call get_substrait('select 1')")
 		require.NoError(t, res.Scan(&substrait))
-		require.Equal(t, "\x1a\x1b\x12\x19\n\x14:\x12\x12\n\n\b*\x06\n\x04\n\x02(*\x1a\x04\n\x02(\x01\x12\x0112\n\x105*\x06DuckDB", substrait)
+		require.Equal(t, "\x1a\"\x12 \n\x1b:\x19\n\x05\x12\x03\n\x01\x01\x12\n\n\b*\x06\n\x04\n\x02(*\x1a\x04\n\x02(\x01\x12\x0112\n\x105*\x06DuckDB", substrait)
 		res = db.QueryRow("call load_aws_credentials('foo')")
 		require.NoError(t, res.Scan(&ak, &sk, &st, &r))
 		// dont check the actual values, just check that there is no error
