@@ -7,7 +7,7 @@ duckdb_extension_load(json)
 duckdb_extension_load(parquet)
 duckdb_extension_load(arrow
     GIT_URL https://github.com/sundeck-io/duckdb-arrow
-    GIT_TAG 4bd9adceab1f8fec5a1fe18b55abbcfa1ef5bd64
+    GIT_TAG 8aa97c019ea453526d39c205041b1de3a8c951dc
 )
 duckdb_extension_load(icu)
 duckdb_extension_load(aws
