@@ -34,7 +34,6 @@ func TestExtensions(t *testing.T) {
 		require.ErrorContains(t, err, "IO Error: Could not establish connection")
 		res = db.QueryRow("SELECT count(*) FROM iceberg_scan('data/iceberg/lineitem_iceberg', allow_moved_paths = true);")
 		err = res.Scan(&sz)
-		expErrorMsg := "IO Error: Failed to read iceberg table. No version was provided and no version-hint could be found"
-		require.ErrorContains(t, err, expErrorMsg)
+		require.ErrorContains(t, err, "IO Error: Cannot open \"data/iceberg/lineitem_iceberg\"")
 	})
 }

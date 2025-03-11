@@ -23,5 +23,5 @@ duckdb_extension_load(substrait
 )
 duckdb_extension_load(iceberg
     GIT_URL https://github.com/duckdb/duckdb-iceberg
-    GIT_TAG c3dbb001bcb6379517c175f6df2856d0d40143df
+    GIT_TAG 3060b30309d82f1059c928de7280286fcf800545
 )
