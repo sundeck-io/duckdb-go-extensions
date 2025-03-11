@@ -8,20 +8,20 @@ duckdb_extension_load(parquet)
 duckdb_extension_load(icu)
 duckdb_extension_load(aws
     GIT_URL https://github.com/duckdb/duckdb-aws
-    GIT_TAG b3050f35c6e99fa35465230493eeab14a78a0409
+    GIT_TAG f92dc8e59a6259bcff2710cab785c983c93cb1cd
 )
 duckdb_extension_load(httpfs
     GIT_URL https://github.com/duckdb/duckdb-httpfs
-    GIT_TAG 85ac4667bcb0d868199e156f8dd918b0278db7b9
+    GIT_TAG cf3584b48ddabdfb58ef69d2649896da2e466405
     INCLUDE_DIR extension/httpfs/include
 )
 duckdb_extension_load(tpch)
 duckdb_extension_load(tpcds)
 duckdb_extension_load(substrait
     GIT_URL https://github.com/substrait-io/duckdb-substrait-extension
-    GIT_TAG e1714242cae21f6a803bca9c4f672878f443faf6
+    GIT_TAG c7615b2813a4551b1057591f7c2889f7ec86690b
 )
 duckdb_extension_load(iceberg
     GIT_URL https://github.com/duckdb/duckdb-iceberg
-    GIT_TAG 3060b30309d82f1059c928de7280286fcf800545
+    GIT_TAG c3dbb001bcb6379517c175f6df2856d0d40143df
 )
