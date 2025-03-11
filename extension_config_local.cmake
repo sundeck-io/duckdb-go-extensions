@@ -7,8 +7,8 @@ duckdb_extension_load(json)
 duckdb_extension_load(parquet)
 duckdb_extension_load(icu)
 duckdb_extension_load(aws
-    GIT_URL https://github.com/duckdb/duckdb-aws
-    GIT_TAG f92dc8e59a6259bcff2710cab785c983c93cb1cd
+    GIT_URL https://github.com/sundeck-io/duckdb-aws
+    GIT_TAG 49537b352be2f02947a9c785b6a6679601c96e6f
 )
 duckdb_extension_load(httpfs
     GIT_URL https://github.com/duckdb/duckdb-httpfs
